@@ -6,6 +6,28 @@ import { ToolCallCard } from './ToolCallCard'
 import { ThinkingBlock } from './ThinkingBlock'
 import { BusMessageCard } from './BusMessageCard'
 
+const MEMBER_COLORS = [
+  'text-orange-300',
+  'text-emerald-300',
+  'text-sky-300',
+  'text-pink-300',
+  'text-yellow-300',
+  'text-violet-300'
+]
+
+function memberColor(name: string): string {
+  let hash = 0
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) | 0
+  return MEMBER_COLORS[Math.abs(hash) % MEMBER_COLORS.length]
+}
+
+function MemberLabel({ name }: { name?: string }) {
+  if (!name) return null
+  return (
+    <div className={`mb-0.5 text-xs font-semibold ${memberColor(name)}`}>{name}</div>
+  )
+}
+
 function renderBlock(block: Block) {
   switch (block.kind) {
     case 'user':
@@ -31,6 +53,7 @@ function renderBlock(block: Block) {
     case 'assistant':
       return (
         <div className="my-2">
+          <MemberLabel name={block.memberName} />
           <MarkdownBlock text={block.text} />
           {block.streaming && (
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-slate-400 align-text-bottom" />
@@ -52,6 +75,9 @@ function renderBlock(block: Block) {
     case 'footer':
       return (
         <div className="my-2 flex items-center gap-3 text-xs text-slate-600">
+          {block.memberName && (
+            <span className={memberColor(block.memberName)}>{block.memberName}</span>
+          )}
           {block.isError ? (
             <span className="flex items-center gap-1 text-red-400">
               <AlertTriangle size={12} />

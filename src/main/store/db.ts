@@ -72,6 +72,14 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE conversations ADD COLUMN persona_name TEXT;
   ALTER TABLE conversations ADD COLUMN persona_prompt TEXT;
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'single';
+  ALTER TABLE conversations ADD COLUMN group_id TEXT;
+  CREATE TABLE IF NOT EXISTS group_member_state (
+    member_id TEXT PRIMARY KEY,
+    last_seq INTEGER NOT NULL DEFAULT 0
+  );
   `
 ]
 

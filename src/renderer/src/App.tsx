@@ -19,6 +19,13 @@ export default function App() {
   const init = useChat((s) => s.init)
   const login = useChat((s) => s.login)
   const activeView = useChat((s) => s.activeView)
+  const activeIsGroup = useChat(
+    (s) => s.conversations.find((c) => c.id === s.activeConvId)?.kind === 'group'
+  )
+  const groupMemberNames = useChat((s) => {
+    const conv = s.conversations.find((c) => c.id === s.activeConvId)
+    return conv?.kind === 'group' ? conv.groupMembers?.map((m) => m.title).join(' · ') : undefined
+  })
   const title = useChat((s) =>
     s.activeView === 'control'
       ? 'Control Room'
@@ -38,7 +45,7 @@ export default function App() {
           <span className="max-w-[240px] truncate text-sm font-semibold tracking-wide text-slate-100">
             {title}
           </span>
-          {activeView === 'chat' && (
+          {activeView === 'chat' && !activeIsGroup && (
             <>
               <ModelPicker />
               <McpPopover />
@@ -46,6 +53,9 @@ export default function App() {
               <PersonaButton />
               <PermissionModeBadge />
             </>
+          )}
+          {activeView === 'chat' && activeIsGroup && groupMemberNames && (
+            <span className="truncate text-xs text-slate-500">{groupMemberNames}</span>
           )}
           <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
             {auth?.state === 'authenticated' ? (

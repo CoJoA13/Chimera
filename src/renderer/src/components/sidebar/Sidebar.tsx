@@ -1,13 +1,15 @@
-import { MessageSquarePlus, Trash2, Settings, Network } from 'lucide-react'
+import { useState } from 'react'
+import { MessageSquarePlus, Trash2, Settings, Network, Users } from 'lucide-react'
 import { useChat } from '../../stores/chat'
+import { NewConversationModal } from './NewConversationModal'
 
 export function Sidebar() {
+  const [newOpen, setNewOpen] = useState(false)
   const conversations = useChat((s) => s.conversations)
   const activeConvId = useChat((s) => s.activeConvId)
   const statusByConv = useChat((s) => s.statusByConv)
   const busAwaitByConv = useChat((s) => s.busAwaitByConv)
   const unreadBusByConv = useChat((s) => s.unreadBusByConv)
-  const newConversation = useChat((s) => s.newConversation)
   const selectConversation = useChat((s) => s.selectConversation)
   const deleteConversation = useChat((s) => s.deleteConversation)
   const setSettingsOpen = useChat((s) => s.setSettingsOpen)
@@ -17,24 +19,16 @@ export function Sidebar() {
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-[#21262d] bg-[#0a0d12]">
-      <div className="flex gap-1.5 p-2">
+      <div className="p-2">
         <button
-          onClick={() => void newConversation('claude')}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#30363d] px-2 py-2 text-sm text-slate-300 hover:bg-[#161b22]"
-          title="New Claude chat"
+          onClick={() => setNewOpen(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#30363d] px-3 py-2 text-sm text-slate-300 hover:bg-[#161b22]"
         >
-          <MessageSquarePlus size={14} />
-          Claude
-        </button>
-        <button
-          onClick={() => void newConversation('codex')}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#30363d] px-2 py-2 text-sm text-slate-300 hover:bg-[#161b22]"
-          title="New Codex chat"
-        >
-          <MessageSquarePlus size={14} />
-          Codex
+          <MessageSquarePlus size={15} />
+          New chat
         </button>
       </div>
+      {newOpen && <NewConversationModal onClose={() => setNewOpen(false)} />}
       <nav className="flex-1 overflow-y-auto px-2">
         {conversations.map((conv) => (
           <div
@@ -46,14 +40,23 @@ export function Sidebar() {
                 : 'text-slate-400 hover:bg-[#131922]'
             }`}
           >
-            <span
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                conv.provider === 'claude' ? 'bg-orange-400/70' : 'bg-emerald-400/70'
-              }`}
-              title={conv.provider}
-            />
+            {conv.kind === 'group' ? (
+              <Users size={12} className="shrink-0 text-cyan-400/80" />
+            ) : (
+              <span
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                  conv.provider === 'claude' ? 'bg-orange-400/70' : 'bg-emerald-400/70'
+                }`}
+                title={conv.provider}
+              />
+            )}
             <span className="flex-1 truncate">
               {conv.title}
+              {conv.kind === 'group' && conv.groupMembers && (
+                <span className="ml-1.5 text-[10px] text-slate-600">
+                  {conv.groupMembers.length}
+                </span>
+              )}
               {conv.personaName && (
                 <span className="ml-1.5 rounded bg-violet-950/60 px-1 py-px text-[10px] text-violet-300">
                   {conv.personaName}

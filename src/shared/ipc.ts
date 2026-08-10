@@ -4,6 +4,7 @@ import type {
   ClaudeDesktopImportCandidate,
   ConversationMcpState,
   ConversationRecord,
+  GroupMemberSpec,
   McpServerRecord,
   McpTransport
 } from './config-types'
@@ -39,7 +40,14 @@ export interface PermissionResponse {
 export interface ChimeraApi {
   // conversations
   listConversations(): Promise<ConversationRecord[]>
-  createConversation(provider: ProviderId, model: string): Promise<ConversationRecord>
+  createConversation(
+    provider: ProviderId,
+    model: string,
+    persona?: { name: string; prompt: string } | null
+  ): Promise<ConversationRecord>
+  createGroup(name: string, members: GroupMemberSpec[]): Promise<ConversationRecord>
+  groupSend(groupId: string, text: string): Promise<void>
+  groupInterrupt(groupId: string): Promise<void>
   renameConversation(id: string, title: string): Promise<void>
   deleteConversation(id: string): Promise<void>
 
@@ -129,6 +137,9 @@ export const IPC = {
   dialogPickFolder: 'dialog:pickFolder',
   conversationSetCwd: 'conversation:setCwd',
   conversationSetPersona: 'conversation:setPersona',
+  conversationCreateGroup: 'conversation:createGroup',
+  sessionGroupSend: 'session:groupSend',
+  sessionGroupInterrupt: 'session:groupInterrupt',
   uiFocusConversation: 'ui:focusConversation',
   busHistory: 'bus:history',
   conferenceRun: 'conference:run',

@@ -34,3 +34,23 @@ export function loadTranscript(conversationId: string): SessionEvent[] {
 export function clearTranscript(conversationId: string): void {
   getDb().prepare('DELETE FROM transcript_cache WHERE conversation_id = ?').run(conversationId)
 }
+
+/** Rows after a cursor — used to build per-member group room history. */
+export function loadTranscriptSince(
+  conversationId: string,
+  afterSeq: number
+): { seq: number; event: SessionEvent }[] {
+  const rows = getDb()
+    .prepare(
+      'SELECT seq, event_json FROM transcript_cache WHERE conversation_id = ? AND seq > ? ORDER BY seq'
+    )
+    .all(conversationId, afterSeq) as unknown as { seq: number; event_json: string }[]
+  return rows.map((r) => ({ seq: r.seq, event: JSON.parse(r.event_json) as SessionEvent }))
+}
+
+export function latestSeq(conversationId: string): number {
+  const row = getDb()
+    .prepare('SELECT MAX(seq) s FROM transcript_cache WHERE conversation_id = ?')
+    .get(conversationId) as { s: number | null } | undefined
+  return row?.s ?? 0
+}

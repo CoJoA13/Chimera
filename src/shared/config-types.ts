@@ -23,8 +23,21 @@ export interface ConversationRecord {
   permissionMode: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
   personaName: string | null
   personaPrompt: string | null
+  kind: 'single' | 'group'
+  /** For member conversations: the group they belong to. */
+  groupId: string | null
+  /** Populated on kind='group' records when listing. */
+  groupMembers?: { id: string; title: string; provider: ProviderId }[]
   createdAt: number
   updatedAt: number
+}
+
+export interface GroupMemberSpec {
+  provider: ProviderId
+  model: string
+  title: string
+  personaName?: string | null
+  personaPrompt?: string | null
 }
 
 export interface PersonaPreset {

@@ -6,8 +6,8 @@ import type { ConversationRecord } from '../../../shared/config-types'
 
 export type Block =
   | { kind: 'user'; id: string; text: string; attachments?: string[] }
-  | { kind: 'assistant'; id: string; text: string; streaming: boolean }
-  | { kind: 'thinking'; id: string; text: string; streaming: boolean }
+  | { kind: 'assistant'; id: string; text: string; streaming: boolean; memberName?: string }
+  | { kind: 'thinking'; id: string; text: string; streaming: boolean; memberName?: string }
   | {
       kind: 'tool'
       id: string
@@ -16,6 +16,7 @@ export type Block =
       output?: unknown
       isError?: boolean
       done: boolean
+      memberName?: string
     }
   | {
       kind: 'footer'
@@ -25,8 +26,9 @@ export type Block =
       durationMs?: number
       isError: boolean
       errorMessage?: string
+      memberName?: string
     }
-  | { kind: 'error'; id: string; text: string }
+  | { kind: 'error'; id: string; text: string; memberName?: string }
   | {
       kind: 'bus'
       id: string
@@ -34,6 +36,7 @@ export type Block =
       peerLocalId: string
       text: string
       isReply: boolean
+      memberName?: string
     }
 
 export interface PendingPermission {
@@ -69,7 +72,21 @@ interface ChatState {
   init(): Promise<void>
   refreshAuth(): Promise<void>
   login(provider?: 'claude' | 'codex'): Promise<void>
-  newConversation(provider?: 'claude' | 'codex', model?: string): Promise<void>
+  newConversation(
+    provider?: 'claude' | 'codex',
+    model?: string,
+    persona?: { name: string; prompt: string } | null
+  ): Promise<void>
+  newGroup(
+    name: string,
+    members: {
+      provider: 'claude' | 'codex'
+      model: string
+      title: string
+      personaName?: string | null
+      personaPrompt?: string | null
+    }[]
+  ): Promise<void>
   selectConversation(id: string): Promise<void>
   deleteConversation(id: string): Promise<void>
   restartActiveSession(): Promise<void>
@@ -169,10 +186,18 @@ export const useChat = create<ChatState>((set, get) => ({
     }, 3000)
   },
 
-  async newConversation(provider = 'claude', model?: string) {
+  async newConversation(provider = 'claude', model?: string, persona?) {
     const defaultModel = provider === 'claude' ? 'claude-sonnet-5' : 'gpt-5.6-sol'
-    const conv = await window.chimera.createConversation(provider, model ?? defaultModel)
+    const conv = await window.chimera.createConversation(provider, model ?? defaultModel, persona)
     set((s) => ({ conversations: [conv, ...s.conversations] }))
+    await get().selectConversation(conv.id)
+  },
+
+  async newGroup(name, members) {
+    const conv = await window.chimera.createGroup(name, members)
+    // Re-list so the group arrives with its member roster attached.
+    const conversations = await window.chimera.listConversations()
+    set({ conversations })
     await get().selectConversation(conv.id)
   },
 
@@ -184,7 +209,9 @@ export const useChat = create<ChatState>((set, get) => ({
     }))
     const s = get()
     if (!s.sessionByConv[id]) {
-      const { localId } = await window.chimera.startSession(id)
+      const conv = s.conversations.find((c) => c.id === id)
+      // Groups have no session of their own; members auto-start on demand.
+      const localId = conv?.kind === 'group' ? id : (await window.chimera.startSession(id)).localId
       set((st) => ({
         sessionByConv: { ...st.sessionByConv, [id]: localId },
         convByLocal: { ...st.convByLocal, [localId]: id },
@@ -267,7 +294,12 @@ export const useChat = create<ChatState>((set, get) => ({
       }))
     }
 
-    await window.chimera.sendMessage(localId, text, attachments)
+    if (conv?.kind === 'group') {
+      set((st) => ({ statusByConv: { ...st.statusByConv, [activeConvId]: 'streaming' } }))
+      await window.chimera.groupSend(activeConvId, text)
+    } else {
+      await window.chimera.sendMessage(localId, text, attachments)
+    }
   },
 
   async setCwd() {
@@ -282,8 +314,13 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   async interrupt() {
-    const { activeConvId, sessionByConv } = get()
+    const { activeConvId, sessionByConv, conversations } = get()
     if (!activeConvId) return
+    const conv = conversations.find((c) => c.id === activeConvId)
+    if (conv?.kind === 'group') {
+      await window.chimera.groupInterrupt(activeConvId)
+      return
+    }
     const localId = sessionByConv[activeConvId]
     if (localId) await window.chimera.interrupt(localId)
   },
@@ -380,7 +417,10 @@ export const useChat = create<ChatState>((set, get) => ({
             )
           )
         } else {
-          setBlocks([...blocks, { kind, id: ev.blockId, text: ev.text, streaming: true }])
+          setBlocks([
+            ...blocks,
+            { kind, id: ev.blockId, text: ev.text, streaming: true, memberName: ev.memberName }
+          ])
         }
         break
       }
@@ -398,7 +438,10 @@ export const useChat = create<ChatState>((set, get) => ({
             )
           )
         } else if (ev.text.trim()) {
-          setBlocks([...blocks, { kind, id: ev.blockId, text: ev.text, streaming: false }])
+          setBlocks([
+            ...blocks,
+            { kind, id: ev.blockId, text: ev.text, streaming: false, memberName: ev.memberName }
+          ])
         }
         break
       }
@@ -406,7 +449,14 @@ export const useChat = create<ChatState>((set, get) => ({
       case 'tool.started':
         setBlocks([
           ...blocks,
-          { kind: 'tool', id: ev.toolUseId, toolName: ev.toolName, input: ev.input, done: false }
+          {
+            kind: 'tool',
+            id: ev.toolUseId,
+            toolName: ev.toolName,
+            input: ev.input,
+            done: false,
+            memberName: ev.memberName
+          }
         ])
         break
 
@@ -428,7 +478,9 @@ export const useChat = create<ChatState>((set, get) => ({
         break
 
       case 'turn.completed':
-        set((st) => ({ statusByConv: { ...st.statusByConv, [convId]: 'idle' } }))
+        if (ev.groupDone !== false) {
+          set((st) => ({ statusByConv: { ...st.statusByConv, [convId]: 'idle' } }))
+        }
         setBlocks([
           ...blocks,
           {
@@ -438,7 +490,8 @@ export const useChat = create<ChatState>((set, get) => ({
             costUsd: ev.costUsd,
             durationMs: ev.durationMs,
             isError: ev.isError,
-            errorMessage: ev.errorMessage
+            errorMessage: ev.errorMessage,
+            memberName: ev.memberName
           }
         ])
         break
@@ -452,7 +505,8 @@ export const useChat = create<ChatState>((set, get) => ({
             direction: ev.direction,
             peerLocalId: ev.direction === 'in' ? ev.from : ev.to,
             text: ev.text,
-            isReply: ev.inReplyTo !== undefined
+            isReply: ev.inReplyTo !== undefined,
+            memberName: ev.memberName
           }
         ])
         if (ev.direction === 'in' && convId !== s.activeConvId) {
@@ -474,7 +528,10 @@ export const useChat = create<ChatState>((set, get) => ({
 
       case 'session.error':
         set((st) => ({ statusByConv: { ...st.statusByConv, [convId]: 'idle' } }))
-        setBlocks([...blocks, { kind: 'error', id: crypto.randomUUID(), text: ev.message }])
+        setBlocks([
+          ...blocks,
+          { kind: 'error', id: crypto.randomUUID(), text: ev.message, memberName: ev.memberName }
+        ])
         break
 
       default:

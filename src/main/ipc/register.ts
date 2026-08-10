@@ -15,7 +15,8 @@ import {
   renameConversation,
   deleteConversation,
   setConversationCwd,
-  setConversationPersona
+  setConversationPersona,
+  listGroupMembers
 } from '../store/conversations'
 import { clearTranscript } from '../store/transcript'
 import { listBusMessages } from '../store/busHistory'
@@ -56,12 +57,66 @@ export function registerIpc(manager: SessionManager): void {
   // conversations
   ipcMain.handle(IPC.conversationList, () => listConversations())
   ipcMain.handle(IPC.conversationCreate, (_e, payload: unknown) => {
-    const { provider, model } = z
-      .object({ provider: providerSchema, model: z.string().min(1) })
+    const { provider, model, persona } = z
+      .object({
+        provider: providerSchema,
+        model: z.string().min(1),
+        persona: z
+          .object({ name: z.string().min(1).max(60), prompt: z.string().max(2000) })
+          .nullish()
+      })
       .parse(payload)
-    const conversation = createConversation(provider, model)
+    const conversation = createConversation(provider, model, {
+      personaName: persona?.name ?? null,
+      personaPrompt: persona?.prompt ?? null
+    })
     manager.registerConversation(conversation.id)
     return conversation
+  })
+
+  ipcMain.handle(IPC.conversationCreateGroup, (_e, payload: unknown) => {
+    const { name, members } = z
+      .object({
+        name: z.string().min(1).max(80),
+        members: z
+          .array(
+            z.object({
+              provider: providerSchema,
+              model: z.string().min(1),
+              title: z.string().min(1).max(60),
+              personaName: z.string().max(60).nullish(),
+              personaPrompt: z.string().max(2000).nullish()
+            })
+          )
+          .min(2)
+      })
+      .parse(payload)
+    const group = createConversation(members[0].provider, members[0].model, {
+      title: name,
+      kind: 'group'
+    })
+    for (const member of members) {
+      const memberConv = createConversation(member.provider, member.model, {
+        title: member.title,
+        groupId: group.id,
+        personaName: member.personaName ?? null,
+        personaPrompt: member.personaPrompt ?? null
+      })
+      manager.registerConversation(memberConv.id)
+    }
+    return { ...group, groupMembers: undefined }
+  })
+
+  ipcMain.handle(IPC.sessionGroupSend, (_e, payload: unknown) => {
+    const { groupId, text } = z
+      .object({ groupId: idSchema, text: z.string().min(1) })
+      .parse(payload)
+    return manager.groupSend(groupId, text)
+  })
+
+  ipcMain.handle(IPC.sessionGroupInterrupt, (_e, payload: unknown) => {
+    const { groupId } = z.object({ groupId: idSchema }).parse(payload)
+    return manager.groupInterrupt(groupId)
   })
   ipcMain.handle(IPC.conversationRename, (_e, payload: unknown) => {
     const { id, title } = z.object({ id: idSchema, title: z.string().min(1) }).parse(payload)
@@ -69,6 +124,13 @@ export function registerIpc(manager: SessionManager): void {
   })
   ipcMain.handle(IPC.conversationDelete, async (_e, payload: unknown) => {
     const { id } = z.object({ id: idSchema }).parse(payload)
+    // Groups: tear down every member first.
+    for (const member of listGroupMembers(id)) {
+      await manager.dispose(member.id)
+      manager.unregisterConversation(member.id)
+      clearTranscript(member.id)
+      deleteConversation(member.id)
+    }
     await manager.dispose(id)
     manager.unregisterConversation(id)
     clearTranscript(id)

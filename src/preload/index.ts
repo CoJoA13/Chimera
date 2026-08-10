@@ -7,8 +7,17 @@ import type { McpTransport } from '../shared/config-types'
 
 const api: ChimeraApi = {
   listConversations: () => ipcRenderer.invoke(IPC.conversationList),
-  createConversation: (provider: ProviderId, model: string) =>
-    ipcRenderer.invoke(IPC.conversationCreate, { provider, model }),
+  createConversation: (
+    provider: ProviderId,
+    model: string,
+    persona?: { name: string; prompt: string } | null
+  ) => ipcRenderer.invoke(IPC.conversationCreate, { provider, model, persona }),
+  createGroup: (name: string, members: unknown[]) =>
+    ipcRenderer.invoke(IPC.conversationCreateGroup, { name, members }),
+  groupSend: (groupId: string, text: string) =>
+    ipcRenderer.invoke(IPC.sessionGroupSend, { groupId, text }),
+  groupInterrupt: (groupId: string) =>
+    ipcRenderer.invoke(IPC.sessionGroupInterrupt, { groupId }),
   renameConversation: (id: string, title: string) =>
     ipcRenderer.invoke(IPC.conversationRename, { id, title }),
   deleteConversation: (id: string) => ipcRenderer.invoke(IPC.conversationDelete, { id }),

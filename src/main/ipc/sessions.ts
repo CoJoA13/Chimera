@@ -7,7 +7,10 @@ import { getProvider } from '../providers/registry'
 import { normalizeStoredHistory } from '../providers/claude/normalize'
 import {
   getConversation,
-  listConversations as listAllConversations,
+  listAllConversationRecords,
+  listGroupMembers,
+  getMemberLastSeq,
+  setMemberLastSeq,
   setProviderSessionId,
   touchConversation,
   setConversationModel,
@@ -17,7 +20,12 @@ import { enabledMcpForConversation } from '../store/mcp'
 import { isAlwaysAllowed, addAlwaysAllowRule } from '../store/permissions'
 import { enabledPluginPaths } from '../store/plugins'
 import { recordBusMessage } from '../store/busHistory'
-import { recordTranscriptEvent, loadTranscript } from '../store/transcript'
+import {
+  recordTranscriptEvent,
+  loadTranscript,
+  loadTranscriptSince,
+  latestSeq
+} from '../store/transcript'
 import type { UserInput } from '../providers/types'
 import { BusCore, BUS_INSTRUCTIONS, formatBusPrompt, type BusMessage } from '../bus/BusCore'
 import { createClaudeBusServer } from '../bus/claudeServer'
@@ -164,9 +172,13 @@ export class SessionManager {
     )
   }
 
+  /** Members' in-flight turns per group — drives the group stream's turn events. */
+  private groupTurns = new Map<string, Set<string>>()
+
   initBusDirectory(): void {
-    for (const conversation of listAllConversations()) {
-      this.registerConversation(conversation.id)
+    for (const conversation of listAllConversationRecords()) {
+      // Groups have no provider session of their own; members register individually.
+      if (conversation.kind !== 'group') this.registerConversation(conversation.id)
     }
     // The control room is a first-class bus participant: conference questions
     // originate here, and agents can send reports directly to the user.
@@ -343,14 +355,60 @@ export class SessionManager {
 
     const conversation = getConversation(conversationId)
     if (!conversation) throw new Error(`Unknown conversation: ${conversationId}`)
+    if (conversation.kind === 'group') {
+      throw new Error('Group conversations have no session of their own — message the group instead')
+    }
 
     const provider = getProvider(conversation.provider)
     // Stable identity: the session's localId IS the conversation id, so bus
     // registrations and renderer routing survive restarts.
     const localId = conversationId
-    const sender = new EventSender(this.getTarget, (ev) =>
-      recordTranscriptEvent(conversationId, ev)
-    )
+    // Group members stream into their group's transcript with attribution.
+    const groupId = conversation.groupId
+    const streamId = groupId ?? conversationId
+    const memberName = groupId ? conversation.title : undefined
+    const sender = new EventSender(this.getTarget, (ev) => recordTranscriptEvent(streamId, ev))
+
+    /** Re-key a member event onto the group stream (ids prefixed, name attached). */
+    const toGroupEvent = (ev: SessionEvent): SessionEvent | null => {
+      if (!groupId) return ev
+      switch (ev.type) {
+        case 'session.registered':
+          return null
+        case 'turn.started': {
+          const turns = this.groupTurns.get(groupId) ?? new Set()
+          turns.add(conversationId)
+          this.groupTurns.set(groupId, turns)
+          return turns.size === 1 ? { ...ev, localId: groupId, memberName } : null
+        }
+        case 'turn.completed': {
+          const turns = this.groupTurns.get(groupId) ?? new Set()
+          turns.delete(conversationId)
+          return { ...ev, localId: groupId, memberName, groupDone: turns.size === 0 }
+        }
+        case 'text.delta':
+        case 'text.done':
+        case 'thinking.delta':
+        case 'thinking.done':
+          return { ...ev, localId: groupId, memberName, blockId: `${conversationId}:${ev.blockId}` }
+        case 'tool.started':
+        case 'tool.output':
+          return {
+            ...ev,
+            localId: groupId,
+            memberName,
+            toolUseId: `${conversationId}:${ev.toolUseId}`
+          }
+        case 'bus.message':
+        case 'session.error':
+          return { ...ev, localId: groupId, memberName }
+        case 'permission.request':
+        case 'bus.status':
+          return { ...ev, localId: groupId }
+        default:
+          return null
+      }
+    }
 
     const mcpServers: McpServerRuntimeConfig[] = enabledMcpForConversation(conversationId).map(
       (record) => ({ name: record.name, config: record.transport })
@@ -373,11 +431,20 @@ export class SessionManager {
     const personaAppend = conversation.personaName
       ? `\n\nPERSONA: In this app you are "${conversation.personaName}". ${conversation.personaPrompt ?? ''} When communicating over the chimera-bus, act and speak in this role.`
       : ''
+    let groupAppend = ''
+    if (groupId) {
+      const group = getConversation(groupId)
+      const others = listGroupMembers(groupId)
+        .filter((m) => m.id !== conversationId)
+        .map((m) => m.title)
+        .join(', ')
+      groupAppend = `\n\nGROUP CHAT: You are "${conversation.title}" in the group chat "${group?.title ?? 'Group'}" together with: ${others || 'nobody else yet'}. Messages arrive with recent room history for context. Respond in character, keep it concise, speak only for yourself, and don't repeat what the room has already said.`
+    }
     const opts = {
       model: conversation.model,
       cwd: conversation.cwd ?? undefined,
       permissionMode: conversation.permissionMode,
-      systemPromptAppend: BUS_INSTRUCTIONS + personaAppend,
+      systemPromptAppend: BUS_INSTRUCTIONS + personaAppend + groupAppend,
       mcpServers,
       plugins: conversation.provider === 'claude' ? enabledPluginPaths() : undefined,
       onEvent: (ev: SessionEvent) => {
@@ -392,21 +459,22 @@ export class SessionManager {
           }
         }
         if (ev.type === 'turn.completed') {
-          const title = getConversation(conversationId)?.title ?? 'Conversation'
+          const title = getConversation(streamId)?.title ?? 'Conversation'
           this.notify(
-            conversationId,
+            streamId,
             ev.isError ? `${title} — turn failed` : `${title} — finished`,
             ev.errorMessage ?? 'The agent finished responding.'
           )
         }
         if (ev.type === 'permission.request') {
           this.notify(
-            conversationId,
+            streamId,
             'Permission needed',
-            `${getConversation(conversationId)?.title ?? 'A conversation'} wants to use ${ev.toolName}`
+            `${conversation.title} wants to use ${ev.toolName}`
           )
         }
-        sender.push(ev)
+        const out = toGroupEvent(ev)
+        if (out) sender.push(out)
         // A completed turn may unblock queued bus messages.
         if (ev.type === 'turn.completed' && this.bus.hasQueued(localId)) {
           this.injectBusMessages(localId, this.bus.drainInbox(localId))
@@ -425,7 +493,7 @@ export class SessionManager {
           this.pendingPermissions.set(permReq.requestId, { resolve, toolName: permReq.toolName })
           sender.push({
             type: 'permission.request',
-            localId,
+            localId: streamId,
             requestId: permReq.requestId,
             toolName: permReq.toolName,
             input: permReq.input,
@@ -445,6 +513,66 @@ export class SessionManager {
     this.registerConversation(conversationId)
 
     return { localId, resumed: conversation.providerSessionId !== null }
+  }
+
+  /**
+   * Group chat send: resolve @-mention targets, build each member's room
+   * update (messages since they last responded), and fan out.
+   */
+  async groupSend(groupId: string, text: string): Promise<void> {
+    const group = getConversation(groupId)
+    if (!group || group.kind !== 'group') throw new Error(`Not a group conversation: ${groupId}`)
+    const members = listGroupMembers(groupId)
+    if (members.length === 0) throw new Error('This group has no members')
+
+    const lower = text.toLowerCase()
+    const mentioned = members.filter((m) => lower.includes(`@${m.title.toLowerCase()}`))
+    const targets = mentioned.length > 0 ? mentioned : members
+
+    // Snapshot each target's room context BEFORE recording the new message.
+    const contexts = new Map<string, string>()
+    for (const member of targets) {
+      const rows = loadTranscriptSince(groupId, getMemberLastSeq(member.id))
+      const lines: string[] = []
+      for (const { event } of rows) {
+        if (event.type === 'user.message') lines.push(`User: ${event.text}`)
+        else if (event.type === 'text.done' && event.memberName && event.memberName !== member.title) {
+          lines.push(`${event.memberName}: ${event.text}`)
+        }
+      }
+      contexts.set(
+        member.id,
+        lines.length > 0
+          ? `<room-history note="group messages since you last responded">\n${lines.join('\n\n')}\n</room-history>\n\n`
+          : ''
+      )
+    }
+
+    touchConversation(groupId)
+    recordTranscriptEvent(groupId, { type: 'user.message', localId: groupId, turnId: 'live', text })
+    const cursor = latestSeq(groupId)
+
+    for (const member of targets) {
+      await this.startForConversation(member.id)
+      const addressed =
+        mentioned.length > 0
+          ? 'The user addressed you directly.'
+          : `The user addressed the whole room; ${targets.length - 1} other member(s) are answering too.`
+      const prompt =
+        `${contexts.get(member.id) ?? ''}` +
+        `New group message from the user: ${text}\n\n` +
+        `${addressed} Respond as ${member.title}.`
+      setMemberLastSeq(member.id, cursor)
+      const live = this.sessions.get(member.id)
+      if (live) void live.session.send({ text: prompt })
+    }
+  }
+
+  async groupInterrupt(groupId: string): Promise<void> {
+    for (const member of listGroupMembers(groupId)) {
+      const live = this.sessions.get(member.id)
+      if (live && live.status === 'busy') await live.session.interrupt()
+    }
   }
 
   /** Replay stored history: transcript cache first, Claude SDK store as legacy fallback. */
