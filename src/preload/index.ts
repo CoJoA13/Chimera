@@ -61,6 +61,26 @@ const api: ChimeraApi = {
   removePlugin: (id: string) => ipcRenderer.invoke(IPC.pluginsRemove, { id }),
   listConnectors: () => ipcRenderer.invoke(IPC.connectorsList),
   addConnector: (id: string) => ipcRenderer.invoke(IPC.connectorsAdd, { id }),
+  busHistory: () => ipcRenderer.invoke(IPC.busHistory),
+  runConference: (
+    question: string,
+    targetConversationIds: string[],
+    synthesizerId: string | null,
+    timeoutSeconds: number
+  ) =>
+    ipcRenderer.invoke(IPC.conferenceRun, {
+      question,
+      targetConversationIds,
+      synthesizerId,
+      timeoutSeconds
+    }),
+  onControlRoomEvent: (cb: (ev: Record<string, unknown>) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, ev: Record<string, unknown>): void => cb(ev)
+    ipcRenderer.on(IPC.controlRoomEvent, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.controlRoomEvent, listener)
+    }
+  },
   listModels: () => ipcRenderer.invoke(IPC.modelsList),
   authStatus: (provider: ProviderId) => ipcRenderer.invoke(IPC.authStatus, { provider }),
   launchLogin: (provider: ProviderId) => ipcRenderer.invoke(IPC.authLaunchLogin, { provider }),

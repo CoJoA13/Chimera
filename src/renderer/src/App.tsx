@@ -10,6 +10,7 @@ import { PermissionModeBadge } from './components/chat/PermissionModeBadge'
 import { BusStatusStrip } from './components/chat/BusStatusStrip'
 import { CwdButton } from './components/chat/CwdButton'
 import { PersonaButton } from './components/chat/PersonaButton'
+import { ControlRoom } from './components/control/ControlRoom'
 import { PermissionDialog } from './components/permissions/PermissionDialog'
 import { SettingsModal } from './components/settings/SettingsModal'
 
@@ -17,8 +18,11 @@ export default function App() {
   const auth = useChat((s) => s.auth)
   const init = useChat((s) => s.init)
   const login = useChat((s) => s.login)
-  const title = useChat(
-    (s) => s.conversations.find((c) => c.id === s.activeConvId)?.title ?? 'Chimera'
+  const activeView = useChat((s) => s.activeView)
+  const title = useChat((s) =>
+    s.activeView === 'control'
+      ? 'Control Room'
+      : (s.conversations.find((c) => c.id === s.activeConvId)?.title ?? 'Chimera')
   )
 
   useEffect(() => {
@@ -34,11 +38,15 @@ export default function App() {
           <span className="max-w-[240px] truncate text-sm font-semibold tracking-wide text-slate-100">
             {title}
           </span>
-          <ModelPicker />
-          <McpPopover />
-          <CwdButton />
-          <PersonaButton />
-          <PermissionModeBadge />
+          {activeView === 'chat' && (
+            <>
+              <ModelPicker />
+              <McpPopover />
+              <CwdButton />
+              <PersonaButton />
+              <PermissionModeBadge />
+            </>
+          )}
           <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
             {auth?.state === 'authenticated' ? (
               <>
@@ -59,9 +67,15 @@ export default function App() {
             ) : null}
           </span>
         </header>
-        <ChatView />
-        <BusStatusStrip />
-        <Composer />
+        {activeView === 'chat' ? (
+          <>
+            <ChatView />
+            <BusStatusStrip />
+            <Composer />
+          </>
+        ) : (
+          <ControlRoom />
+        )}
       </div>
       <PermissionDialog />
       <SettingsModal />

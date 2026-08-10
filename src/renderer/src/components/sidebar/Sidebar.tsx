@@ -11,6 +11,9 @@ export function Sidebar() {
   const selectConversation = useChat((s) => s.selectConversation)
   const deleteConversation = useChat((s) => s.deleteConversation)
   const setSettingsOpen = useChat((s) => s.setSettingsOpen)
+  const activeView = useChat((s) => s.activeView)
+  const setActiveView = useChat((s) => s.setActiveView)
+  const inboundCount = useChat((s) => s.controlInbound.length)
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-[#21262d] bg-[#0a0d12]">
@@ -84,6 +87,22 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="border-t border-[#21262d] p-2">
+        <button
+          onClick={() => setActiveView(activeView === 'control' ? 'chat' : 'control')}
+          className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm ${
+            activeView === 'control'
+              ? 'bg-cyan-950/40 text-cyan-300'
+              : 'text-slate-400 hover:bg-[#161b22]'
+          }`}
+        >
+          <Network size={15} />
+          Control Room
+          {inboundCount > 0 && (
+            <span className="ml-auto rounded-full bg-violet-800 px-1.5 text-[10px] text-white">
+              {inboundCount}
+            </span>
+          )}
+        </button>
         <button
           onClick={() => setSettingsOpen(true)}
           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-[#161b22]"

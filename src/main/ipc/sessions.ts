@@ -84,6 +84,16 @@ interface PendingPermission {
   toolName: string
 }
 
+/** The bus identity of the app itself — conferences and user-directed reports. */
+export const CONTROL_ROOM_ID = 'control-room'
+
+export interface ConferenceReply {
+  conversationId: string
+  status: 'replied' | 'timeout' | 'error'
+  text?: string
+  error?: string
+}
+
 export class SessionManager {
   /** Live sessions, keyed by conversationId (session localId === conversationId). */
   private sessions = new Map<string, LiveSession>()
@@ -158,6 +168,115 @@ export class SessionManager {
     for (const conversation of listAllConversations()) {
       this.registerConversation(conversation.id)
     }
+    // The control room is a first-class bus participant: conference questions
+    // originate here, and agents can send reports directly to the user.
+    this.bus.register(
+      CONTROL_ROOM_ID,
+      () => ({
+        localId: CONTROL_ROOM_ID,
+        conversationId: CONTROL_ROOM_ID,
+        title: 'Control Room',
+        provider: 'user',
+        status: 'idle',
+        persona: "The user's console — send reports or questions for the human here."
+      }),
+      (msg) => {
+        const target = this.getTarget()
+        if (target && !target.isDestroyed()) {
+          target.send('controlroom:event', {
+            type: 'inbound',
+            fromId: msg.from,
+            messageId: msg.messageId,
+            text: msg.text,
+            expectsReply: msg.expectsReply
+          })
+        }
+        this.notify(
+          msg.from,
+          'Message for the Control Room',
+          `${getConversation(msg.from)?.title ?? 'An agent'}: ${msg.text}`
+        )
+      }
+    )
+  }
+
+  /**
+   * App-orchestrated conference: fan a question out to selected conversations,
+   * collect replies under one timeout, optionally hand the results to a
+   * synthesizer conversation. Progress streams over 'controlroom:event'.
+   */
+  async conference(
+    question: string,
+    targetConversationIds: string[],
+    synthesizerId: string | null,
+    timeoutSeconds: number
+  ): Promise<ConferenceReply[]> {
+    const target = this.getTarget()
+    const progress = (payload: unknown): void => {
+      if (target && !target.isDestroyed()) target.send('controlroom:event', payload)
+    }
+
+    // Ensure every participant is live, then fan out.
+    const sent: { conversationId: string; messageId?: string; error?: string }[] = []
+    for (const convId of targetConversationIds) {
+      try {
+        await this.startForConversation(convId)
+        const messageId = this.bus.send(
+          CONTROL_ROOM_ID,
+          convId,
+          `CONFERENCE QUESTION from the user: ${question}`,
+          true
+        )
+        sent.push({ conversationId: convId, messageId })
+        progress({ type: 'conference.sent', conversationId: convId })
+      } catch (err) {
+        sent.push({
+          conversationId: convId,
+          error: err instanceof Error ? err.message : String(err)
+        })
+        progress({ type: 'conference.error', conversationId: convId })
+      }
+    }
+
+    const awaited = sent.filter((s) => s.messageId)
+    const results = await this.bus.awaitReplies(
+      CONTROL_ROOM_ID,
+      awaited.map((s) => s.messageId!),
+      timeoutSeconds
+    )
+
+    const replies: ConferenceReply[] = sent.map((s) => {
+      if (!s.messageId) return { conversationId: s.conversationId, status: 'error', error: s.error }
+      const result = results.find((r) => r.messageId === s.messageId)?.result
+      if (!result) return { conversationId: s.conversationId, status: 'timeout' }
+      return result.status === 'replied'
+        ? { conversationId: s.conversationId, status: 'replied', text: result.text }
+        : { conversationId: s.conversationId, status: result.status, error: result.error }
+    })
+
+    if (synthesizerId) {
+      const answers = replies
+        .map((r) => {
+          const title = getConversation(r.conversationId)?.title ?? r.conversationId
+          return r.status === 'replied'
+            ? `--- Answer from ${title} ---\n${r.text}`
+            : `--- ${title}: no answer (${r.status}) ---`
+        })
+        .join('\n\n')
+      try {
+        await this.startForConversation(synthesizerId)
+        this.bus.send(
+          CONTROL_ROOM_ID,
+          synthesizerId,
+          `The user ran a conference. Question: "${question}"\n\n${answers}\n\nSynthesize these answers for the user: where do they agree, where do they conflict, and what is your recommendation?`,
+          false
+        )
+        progress({ type: 'conference.synthesis', conversationId: synthesizerId })
+      } catch {
+        // synthesis is best-effort
+      }
+    }
+    return replies
   }
 
   unregisterConversation(conversationId: string): void {
@@ -199,6 +318,7 @@ export class SessionManager {
       })
     }
     const fromLabel = (from: string): string => {
+      if (from === CONTROL_ROOM_ID) return "Control Room (the user's console)"
       const conv = getConversation(from)
       if (!conv) return 'peer session'
       return conv.personaName ? `${conv.title} (${conv.personaName})` : conv.title

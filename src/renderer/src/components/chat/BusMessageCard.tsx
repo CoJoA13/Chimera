@@ -48,6 +48,8 @@ export function BusMessageCard({
             >
               {peerConv.title}
             </button>
+          ) : peerLocalId === 'control-room' ? (
+            <span className="text-cyan-300">Control Room</span>
           ) : (
             <span className="text-slate-500">another session</span>
           )}

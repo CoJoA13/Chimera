@@ -85,6 +85,28 @@ export interface ChimeraApi {
   listConnectors(): Promise<ConnectorEntry[]>
   addConnector(id: string): Promise<void>
 
+  // control room
+  busHistory(): Promise<
+    {
+      messageId: string
+      fromId: string
+      toId: string
+      inReplyTo: string | null
+      kind: string
+      text: string
+      createdAt: number
+    }[]
+  >
+  runConference(
+    question: string,
+    targetConversationIds: string[],
+    synthesizerId: string | null,
+    timeoutSeconds: number
+  ): Promise<
+    { conversationId: string; status: 'replied' | 'timeout' | 'error'; text?: string; error?: string }[]
+  >
+  onControlRoomEvent(cb: (ev: Record<string, unknown>) => void): () => void
+
   // misc
   listModels(): Promise<ModelInfo[]>
   authStatus(provider: ProviderId): Promise<AuthStatus>
@@ -108,6 +130,9 @@ export const IPC = {
   conversationSetCwd: 'conversation:setCwd',
   conversationSetPersona: 'conversation:setPersona',
   uiFocusConversation: 'ui:focusConversation',
+  busHistory: 'bus:history',
+  conferenceRun: 'conference:run',
+  controlRoomEvent: 'controlroom:event',
   sessionInterrupt: 'session:interrupt',
   sessionSetModel: 'session:setModel',
   sessionDispose: 'session:dispose',

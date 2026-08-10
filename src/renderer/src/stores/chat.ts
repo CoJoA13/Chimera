@@ -62,6 +62,9 @@ interface ChatState {
   auth: AuthStatus | null
   codexAuth: AuthStatus | null
   settingsOpen: boolean
+  activeView: 'chat' | 'control'
+  /** Reports agents sent to the Control Room (bus target: control-room). */
+  controlInbound: { fromId: string; messageId: string; text: string; at: number }[]
 
   init(): Promise<void>
   refreshAuth(): Promise<void>
@@ -80,6 +83,7 @@ interface ChatState {
     mode: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
   ): Promise<void>
   setSettingsOpen(open: boolean): void
+  setActiveView(view: 'chat' | 'control'): void
   handleEvent(ev: SessionEvent): void
 }
 
@@ -108,6 +112,8 @@ export const useChat = create<ChatState>((set, get) => ({
   auth: null,
   codexAuth: null,
   settingsOpen: false,
+  activeView: 'chat',
+  controlInbound: [],
 
   async init() {
     // Guard against StrictMode double-invocation and HMR remounts.
@@ -116,6 +122,21 @@ export const useChat = create<ChatState>((set, get) => ({
     window.chimera.onSessionEvent((ev) => get().handleEvent(ev))
     window.chimera.onFocusConversation((conversationId) => {
       void get().selectConversation(conversationId)
+    })
+    window.chimera.onControlRoomEvent((ev) => {
+      if (ev.type === 'inbound') {
+        set((s) => ({
+          controlInbound: [
+            ...s.controlInbound,
+            {
+              fromId: ev.fromId as string,
+              messageId: ev.messageId as string,
+              text: ev.text as string,
+              at: Date.now()
+            }
+          ]
+        }))
+      }
     })
     const [models, auth, codexAuth, conversations] = await Promise.all([
       window.chimera.listModels(),
@@ -156,7 +177,11 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   async selectConversation(id) {
-    set((st) => ({ activeConvId: id, unreadBusByConv: { ...st.unreadBusByConv, [id]: false } }))
+    set((st) => ({
+      activeConvId: id,
+      activeView: 'chat',
+      unreadBusByConv: { ...st.unreadBusByConv, [id]: false }
+    }))
     const s = get()
     if (!s.sessionByConv[id]) {
       const { localId } = await window.chimera.startSession(id)
@@ -313,6 +338,10 @@ export const useChat = create<ChatState>((set, get) => ({
 
   setSettingsOpen(open) {
     set({ settingsOpen: open })
+  },
+
+  setActiveView(view) {
+    set({ activeView: view })
   },
 
   handleEvent(ev) {

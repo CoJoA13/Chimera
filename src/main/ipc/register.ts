@@ -18,6 +18,7 @@ import {
   setConversationPersona
 } from '../store/conversations'
 import { clearTranscript } from '../store/transcript'
+import { listBusMessages } from '../store/busHistory'
 import {
   listMcpServers,
   addMcpServer,
@@ -247,6 +248,20 @@ export function registerIpc(manager: SessionManager): void {
     const connector = loadConnectors().find((c) => c.id === id)
     if (!connector) throw new Error(`Unknown connector: ${id}`)
     addMcpServer(connector.name, connector.transport as McpTransport, 'connector-directory')
+  })
+
+  // control room
+  ipcMain.handle(IPC.busHistory, () => listBusMessages())
+  ipcMain.handle(IPC.conferenceRun, (_e, payload: unknown) => {
+    const { question, targetConversationIds, synthesizerId, timeoutSeconds } = z
+      .object({
+        question: z.string().min(1),
+        targetConversationIds: z.array(idSchema).min(1),
+        synthesizerId: idSchema.nullable(),
+        timeoutSeconds: z.number().min(10).max(300)
+      })
+      .parse(payload)
+    return manager.conference(question, targetConversationIds, synthesizerId, timeoutSeconds)
   })
 
   // misc
