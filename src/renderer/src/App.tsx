@@ -18,6 +18,7 @@ import { VerifyToggle } from './components/chat/VerifyToggle'
 import { SecondOpinionButton } from './components/chat/SecondOpinionButton'
 import { CommandPalette } from './components/palette/CommandPalette'
 import { OnboardingModal } from './components/onboarding/OnboardingModal'
+import { Toasts } from './components/common/Toasts'
 import { PermissionDialog } from './components/permissions/PermissionDialog'
 import { SettingsModal } from './components/settings/SettingsModal'
 
@@ -123,6 +124,7 @@ export default function App() {
       <SettingsModal />
       <CommandPalette />
       <OnboardingModal />
+      <Toasts />
     </div>
   )
 }

@@ -78,6 +78,7 @@ interface ChatState {
   activeView: 'chat' | 'control'
   /** Reports agents sent to the Control Room (bus target: control-room). */
   controlInbound: { fromId: string; messageId: string; text: string; at: number }[]
+  toasts: { id: string; text: string; kind: 'error' | 'info' }[]
 
   init(): Promise<void>
   refreshAuth(): Promise<void>
@@ -116,6 +117,8 @@ interface ChatState {
   /** Refresh the list and select a conversation created outside the store. */
   adoptConversation(id: string): Promise<void>
   setActiveView(view: 'chat' | 'control'): void
+  pushToast(text: string, kind?: 'error' | 'info'): void
+  dismissToast(id: string): void
   handleEvent(ev: SessionEvent): void
 }
 
@@ -149,6 +152,7 @@ export const useChat = create<ChatState>((set, get) => ({
   onboardingOpen: false,
   activeView: 'chat',
   controlInbound: [],
+  toasts: [],
 
   async init() {
     // Guard against StrictMode double-invocation and HMR remounts.
@@ -233,7 +237,15 @@ export const useChat = create<ChatState>((set, get) => ({
     if (!s.sessionByConv[id]) {
       const conv = s.conversations.find((c) => c.id === id)
       // Groups have no session of their own; members auto-start on demand.
-      const localId = conv?.kind === 'group' ? id : (await window.chimera.startSession(id)).localId
+      let localId: string
+      try {
+        localId = conv?.kind === 'group' ? id : (await window.chimera.startSession(id)).localId
+      } catch (err) {
+        get().pushToast(
+          `Could not start session: ${err instanceof Error ? err.message : err}`
+        )
+        return
+      }
       set((st) => ({
         sessionByConv: { ...st.sessionByConv, [id]: localId },
         convByLocal: { ...st.convByLocal, [localId]: id },
@@ -307,11 +319,16 @@ export const useChat = create<ChatState>((set, get) => ({
     }))
 
     const conv = conversations.find((c) => c.id === activeConvId)
-    if (conv?.kind === 'group') {
-      set((st) => ({ statusByConv: { ...st.statusByConv, [activeConvId]: 'streaming' } }))
-      await window.chimera.groupSend(activeConvId, text)
-    } else {
-      await window.chimera.sendMessage(localId, text, attachments)
+    try {
+      if (conv?.kind === 'group') {
+        set((st) => ({ statusByConv: { ...st.statusByConv, [activeConvId]: 'streaming' } }))
+        await window.chimera.groupSend(activeConvId, text)
+      } else {
+        await window.chimera.sendMessage(localId, text, attachments)
+      }
+    } catch (err) {
+      set((st) => ({ statusByConv: { ...st.statusByConv, [activeConvId]: 'idle' } }))
+      get().pushToast(err instanceof Error ? err.message : String(err))
     }
   },
 
@@ -411,6 +428,16 @@ export const useChat = create<ChatState>((set, get) => ({
 
   setActiveView(view) {
     set({ activeView: view })
+  },
+
+  pushToast(text, kind = 'error') {
+    const id = crypto.randomUUID()
+    set((s) => ({ toasts: [...s.toasts, { id, text, kind }] }))
+    setTimeout(() => get().dismissToast(id), 7000)
+  },
+
+  dismissToast(id) {
+    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
   },
 
   handleEvent(ev) {

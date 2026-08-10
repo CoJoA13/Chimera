@@ -64,6 +64,16 @@ export function UsagePane() {
           Subscription-metered turns (ChatGPT login) report $0; the budget gates API-billed usage.
           Clear the field to remove the cap.
         </p>
+        <button
+          onClick={() =>
+            void window.chimera.exportBackup().then((dest) => {
+              if (dest) window.alert(`Backup written to ${dest}`)
+            })
+          }
+          className="mt-3 rounded-md border border-[#30363d] px-3 py-1.5 text-xs text-slate-300 hover:bg-[#21262d]"
+        >
+          Export backup (database, memories, skills, artifacts)…
+        </button>
       </div>
 
       <div>

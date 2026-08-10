@@ -84,7 +84,18 @@ class CodexSession implements ProviderSession {
     this.opts.onEvent(ev)
   }
 
+  private sendQueue: UserInput[] = []
+
+  /** Codex cannot run concurrent turns on one thread — queue while busy. */
   async send(input: UserInput): Promise<void> {
+    this.sendQueue.push(input)
+    this.processQueue()
+  }
+
+  private processQueue(): void {
+    if (this.status === 'busy') return
+    const input = this.sendQueue.shift()
+    if (!input) return
     this.currentTurnId = randomUUID()
     this.status = 'busy'
     this.emit({ type: 'turn.started', localId: this.localId, turnId: this.currentTurnId })
@@ -300,6 +311,7 @@ class CodexSession implements ProviderSession {
         this.status = 'idle'
         this.emit({ type: 'turn.completed', localId, turnId, isError: false })
       }
+      this.processQueue()
     } catch (err) {
       this.status = 'idle'
       const message = err instanceof Error ? err.message : String(err)
@@ -309,6 +321,7 @@ class CodexSession implements ProviderSession {
         this.emit({ type: 'session.error', localId, message, fatal: false })
         this.emit({ type: 'turn.completed', localId, turnId, isError: true, errorMessage: message })
       }
+      this.processQueue()
     }
   }
 

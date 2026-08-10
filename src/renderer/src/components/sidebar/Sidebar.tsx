@@ -79,7 +79,9 @@ export function Sidebar() {
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                void deleteConversation(conv.id)
+                if (window.confirm(`Delete "${conv.title}"? This removes its history and memory.`)) {
+                  void deleteConversation(conv.id)
+                }
               }}
               className="hidden shrink-0 text-slate-600 group-hover:block hover:text-red-400"
               title="Delete conversation"

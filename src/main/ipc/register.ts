@@ -51,6 +51,7 @@ import { activitySince } from '../store/activity'
 import { secondOpinion } from '../secondOpinion'
 import { summarizeBrief } from '../titles'
 import type { FederationManager } from '../federation'
+import { exportBackup } from '../store/maintenance'
 import {
   listMcpServers,
   addMcpServer,
@@ -590,6 +591,8 @@ export function registerIpc(
       title: getConversation(hit.conversationId)?.title ?? 'deleted conversation'
     }))
   })
+
+  ipcMain.handle(IPC.backupExport, () => exportBackup())
 
   // generic settings
   ipcMain.handle(IPC.settingsGet, (_e, payload: unknown) => {

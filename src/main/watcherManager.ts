@@ -66,7 +66,8 @@ export class WatcherManager {
     this.debounces.set(watcherId, { timer, files })
   }
 
-  private async pollGit(): Promise<void> {
+  /** Public for tests — the interval calls this every minute. */
+  async pollGit(): Promise<void> {
     for (const record of listWatchers()) {
       if (!record.enabled || record.kind !== 'git' || !existsSync(record.path)) continue
       const head = await new Promise<string | null>((resolve) => {

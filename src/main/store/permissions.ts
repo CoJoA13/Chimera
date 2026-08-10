@@ -1,18 +1,24 @@
 import { randomUUID } from 'node:crypto'
 import { getDb } from './db'
 
-export function isAlwaysAllowed(toolName: string): boolean {
+/** A rule matches when global (conversation_id NULL) or scoped to this conversation. */
+export function isAlwaysAllowed(toolName: string, conversationId?: string): boolean {
   const row = getDb()
-    .prepare("SELECT id FROM permission_rules WHERE tool_name = ? AND behavior = 'allow'")
-    .get(toolName)
+    .prepare(
+      `SELECT id FROM permission_rules WHERE tool_name = ? AND behavior = 'allow'
+       AND (conversation_id IS NULL OR conversation_id = ?)`
+    )
+    .get(toolName, conversationId ?? null)
   return row !== undefined
 }
 
-export function addAlwaysAllowRule(toolName: string): void {
-  if (isAlwaysAllowed(toolName)) return
+export function addAlwaysAllowRule(toolName: string, conversationId?: string): void {
+  if (isAlwaysAllowed(toolName, conversationId)) return
   getDb()
-    .prepare("INSERT INTO permission_rules (id, tool_name, behavior) VALUES (?, ?, 'allow')")
-    .run(randomUUID(), toolName)
+    .prepare(
+      "INSERT INTO permission_rules (id, tool_name, behavior, conversation_id) VALUES (?, ?, 'allow', ?)"
+    )
+    .run(randomUUID(), toolName, conversationId ?? null)
 }
 
 export function listRules(): { id: string; toolName: string; behavior: string }[] {

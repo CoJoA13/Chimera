@@ -192,6 +192,14 @@ export class FederationManager {
       res.writeHead(404).end()
       return
     }
+    // Inbound callers must be a configured peer (or loopback for local testing):
+    // federation only activates once BOTH sides have added each other.
+    const remote = req.socket.remoteAddress?.replace('::ffff:', '') ?? ''
+    const isLoopback = remote === '127.0.0.1' || remote === '::1'
+    if (!isLoopback && this.peerForRequest(req) === null) {
+      res.writeHead(403).end()
+      return
+    }
     if (match[2] === 'sessions' && req.method === 'GET') {
       const sessions = this.bus
         .listSessions('')
@@ -242,10 +250,10 @@ export class FederationManager {
     res.writeHead(405).end()
   }
 
-  /** Best-effort: match the caller to a configured peer by remote address host. */
+  /** Strict: match the caller to a configured peer by remote address host. */
   private peerForRequest(req: IncomingMessage): FedPeer | null {
     const remote = req.socket.remoteAddress?.replace('::ffff:', '')
-    if (!remote) return this.listPeers()[0] ?? null
+    if (!remote) return null
     return (
       this.listPeers().find((p) => {
         try {
@@ -253,9 +261,7 @@ export class FederationManager {
         } catch {
           return false
         }
-      }) ??
-      this.listPeers()[0] ??
-      null
+      }) ?? null
     )
   }
 }

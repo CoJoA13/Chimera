@@ -101,6 +101,7 @@ interface LiveSession {
 interface PendingPermission {
   resolve: (d: PermissionDecision) => void
   toolName: string
+  conversationId: string
 }
 
 /** The bus identity of the app itself — conferences and user-directed reports. */
@@ -488,6 +489,11 @@ export class SessionManager {
             live.status = 'idle'
           }
         }
+        // Zombie recovery: a fatally-errored session is torn down so the next
+        // send lazily restarts it with resume.
+        if (ev.type === 'session.error' && ev.fatal) {
+          void this.dispose(localId)
+        }
         if (ev.type === 'turn.completed') {
           if (ev.costUsd) recordSpend(conversationId, ev.costUsd)
           // Auto-verification: check the answer with the OTHER provider, async.
@@ -539,11 +545,15 @@ export class SessionManager {
         input: Record<string, unknown>
         suggestions?: unknown
       }): Promise<PermissionDecision> => {
-        if (isAlwaysAllowed(permReq.toolName)) {
+        if (isAlwaysAllowed(permReq.toolName, conversationId)) {
           return { behavior: 'allow' }
         }
         return new Promise<PermissionDecision>((resolve) => {
-          this.pendingPermissions.set(permReq.requestId, { resolve, toolName: permReq.toolName })
+          this.pendingPermissions.set(permReq.requestId, {
+            resolve,
+            toolName: permReq.toolName,
+            conversationId
+          })
           sender.push({
             type: 'permission.request',
             localId: streamId,
@@ -669,9 +679,17 @@ export class SessionManager {
     }
   }
 
+  /** Get the live session, lazily (re)starting it — recovers zombie sessions. */
+  private async ensureLive(localId: string): Promise<LiveSession> {
+    if (!this.sessions.has(localId)) {
+      await this.startForConversation(localId)
+    }
+    return this.get(localId)
+  }
+
   async send(localId: string, text: string, attachments?: UserInput['attachments']): Promise<void> {
     this.checkBudget()
-    const live = this.get(localId)
+    const live = await this.ensureLive(localId)
     touchConversation(live.conversationId)
     // First message in an untitled chat: generate a proper title in the background.
     const conversation = getConversation(live.conversationId)
@@ -744,7 +762,9 @@ export class SessionManager {
     const pending = this.pendingPermissions.get(requestId)
     if (!pending) return
     this.pendingPermissions.delete(requestId)
-    if (behavior === 'allow' && always) addAlwaysAllowRule(pending.toolName)
+    if (behavior === 'allow' && always) {
+      addAlwaysAllowRule(pending.toolName, pending.conversationId)
+    }
     pending.resolve(behavior === 'allow' ? { behavior: 'allow' } : { behavior: 'deny' })
   }
 

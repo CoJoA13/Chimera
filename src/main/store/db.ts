@@ -145,6 +145,9 @@ const MIGRATIONS: string[] = [
     url TEXT NOT NULL,
     added_at INTEGER NOT NULL
   );
+  `,
+  `
+  ALTER TABLE permission_rules ADD COLUMN conversation_id TEXT;
   `
 ]
 

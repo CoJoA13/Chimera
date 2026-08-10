@@ -32,9 +32,10 @@ export function PermissionDialog() {
           </button>
           <button
             onClick={() => void respond(current.requestId, 'allow', true)}
+            title="Always allow this tool in THIS conversation only"
             className="rounded-md border border-emerald-800 bg-emerald-900/40 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-900/70"
           >
-            Always allow {current.toolName}
+            Always allow (this chat)
           </button>
           <button
             onClick={() => void respond(current.requestId, 'allow')}

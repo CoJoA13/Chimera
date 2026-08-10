@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { Virtuoso } from 'react-virtuoso'
 import { AlertTriangle } from 'lucide-react'
 import { useChat, type Block } from '../../stores/chat'
 import { MarkdownBlock } from './MarkdownBlock'
@@ -127,26 +127,36 @@ export function ChatView() {
   const blocks = useChat((s) =>
     s.activeConvId ? (s.blocksByConv[s.activeConvId] ?? EMPTY_BLOCKS) : EMPTY_BLOCKS
   )
-  const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'instant' })
-  }, [blocks])
+  if (blocks.length === 0) {
+    return (
+      <div className="flex-1 px-4">
+        <div className="mt-24 text-center text-slate-600">
+          <p className="text-2xl font-light">Chimera</p>
+          <p className="mt-2 text-sm">Start a conversation.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4">
-      <div className="mx-auto max-w-3xl py-6">
-        {blocks.length === 0 && (
-          <div className="mt-24 text-center text-slate-600">
-            <p className="text-2xl font-light">Chimera</p>
-            <p className="mt-2 text-sm">Start a conversation with Claude.</p>
-          </div>
-        )}
-        {blocks.map((block) => (
-          <div key={block.id}>{renderBlock(block)}</div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
-    </div>
+    <Virtuoso
+      className="flex-1"
+      data={blocks}
+      computeItemKey={(_i, block) => block.id}
+      // Pin to bottom only while already at the bottom; don't yank during reading.
+      followOutput={(isAtBottom) => (isAtBottom ? 'auto' : false)}
+      initialTopMostItemIndex={blocks.length - 1}
+      increaseViewportBy={{ top: 600, bottom: 300 }}
+      itemContent={(_i, block) => (
+        <div className="px-4">
+          <div className="mx-auto max-w-3xl">{renderBlock(block)}</div>
+        </div>
+      )}
+      components={{
+        Header: () => <div className="h-4" />,
+        Footer: () => <div className="h-4" />
+      }}
+    />
   )
 }

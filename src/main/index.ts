@@ -6,6 +6,7 @@ import { SessionManager } from './ipc/sessions'
 import { startScheduler } from './scheduler'
 import { WatcherManager } from './watcherManager'
 import { FederationManager } from './federation'
+import { pruneOldData } from './store/maintenance'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -54,6 +55,8 @@ app.whenReady().then(() => {
   startScheduler(sessionManager)
   watcherManager.start()
   void federationManager.start()
+  pruneOldData()
+  setInterval(pruneOldData, 24 * 60 * 60 * 1000)
   createWindow()
 
   app.on('activate', () => {

@@ -211,6 +211,7 @@ export interface ChimeraApi {
   // fork / search / settings
   forkConversation(conversationId: string): Promise<ConversationRecord>
   searchAll(query: string): Promise<{ conversationId: string; title: string; snippet: string }[]>
+  exportBackup(): Promise<string | null>
   getSetting(key: string): Promise<unknown>
   setSetting(key: string, value: unknown): Promise<void>
   onConversationsChanged(cb: () => void): () => void
@@ -263,6 +264,7 @@ export const IPC = {
   memoryGet: 'memory:get',
   conversationFork: 'conversation:fork',
   searchAll: 'search:all',
+  backupExport: 'backup:export',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   uiConversationsChanged: 'ui:conversationsChanged',
