@@ -6,6 +6,12 @@ import { createConversation } from '../src/main/store/conversations'
 import { saveTemplateFromConversation, getTemplate, listTemplates } from '../src/main/store/templates'
 import { busToolDefs } from '../src/main/bus/tools'
 import { BusCore } from '../src/main/bus/BusCore'
+import {
+  addWatcher,
+  listWatchers,
+  setWatcherState,
+  removeWatchersFor
+} from '../src/main/store/watchers'
 
 describe('agent memory', () => {
   it('round-trips and enforces the size cap', () => {
@@ -64,6 +70,56 @@ describe('schedules', () => {
     // Next run is now ~30min out again: not due just before, due just after.
     expect(dueSchedules(Date.now() + 29 * 60_000).find((d) => d.id === s.id)).toBeUndefined()
     expect(dueSchedules(Date.now() + 31 * 60_000).find((d) => d.id === s.id)).toBeDefined()
+  })
+})
+
+describe('watchers store', () => {
+  it('round-trips and tracks git state', () => {
+    const w = addWatcher('watch-conv', '/tmp/some-repo', 'git', 'review new commits')
+    expect(listWatchers().find((x) => x.id === w.id)?.lastState).toBeNull()
+    setWatcherState(w.id, 'abc123')
+    expect(listWatchers().find((x) => x.id === w.id)?.lastState).toBe('abc123')
+    removeWatchersFor('watch-conv')
+    expect(listWatchers().some((x) => x.conversationId === 'watch-conv')).toBe(false)
+  })
+})
+
+describe('agent-managed schedules', () => {
+  it('creates, lists, and deletes schedules scoped to the caller', async () => {
+    const defs = busToolDefs(new BusCore(), 'sched-tool-conv')
+    const create = defs.find((d) => d.name === 'create_schedule')!
+    const list = defs.find((d) => d.name === 'list_schedules')!
+    const del = defs.find((d) => d.name === 'delete_schedule')!
+
+    const created = await create.handler({
+      prompt: 'check the repo',
+      every_hours: 4
+    } as never)
+    expect(created.isError).toBeUndefined()
+    const scheduleId = (JSON.parse(created.content[0].text) as { schedule_id: string }).schedule_id
+
+    const listed = JSON.parse((await list.handler({} as never)).content[0].text) as {
+      schedules: { schedule_id: string }[]
+    }
+    expect(listed.schedules.some((s) => s.schedule_id === scheduleId)).toBe(true)
+
+    // Another session cannot delete it.
+    const otherDefs = busToolDefs(new BusCore(), 'other-conv')
+    const otherDel = otherDefs.find((d) => d.name === 'delete_schedule')!
+    const denied = await otherDel.handler({ schedule_id: scheduleId } as never)
+    expect(denied.isError).toBe(true)
+
+    const removed = await del.handler({ schedule_id: scheduleId } as never)
+    expect(removed.isError).toBeUndefined()
+  })
+
+  it('rejects schedules without a cadence and from the control room', async () => {
+    const defs = busToolDefs(new BusCore(), 'sched-tool-conv2')
+    const create = defs.find((d) => d.name === 'create_schedule')!
+    expect((await create.handler({ prompt: 'x' } as never)).isError).toBe(true)
+    const crDefs = busToolDefs(new BusCore(), 'control-room')
+    const crCreate = crDefs.find((d) => d.name === 'create_schedule')!
+    expect((await crCreate.handler({ prompt: 'x', every_hours: 1 } as never)).isError).toBe(true)
   })
 })
 

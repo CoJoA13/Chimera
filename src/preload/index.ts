@@ -16,6 +16,16 @@ const api: ChimeraApi = {
     ipcRenderer.invoke(IPC.conversationCreateGroup, { name, members }),
   groupSend: (groupId: string, text: string) =>
     ipcRenderer.invoke(IPC.sessionGroupSend, { groupId, text }),
+  addGroupMember: (groupId: string, member: unknown) =>
+    ipcRenderer.invoke(IPC.conversationAddMember, { groupId, member }),
+  removeGroupMember: (memberId: string) =>
+    ipcRenderer.invoke(IPC.conversationRemoveMember, { memberId }),
+  listWatchers: () => ipcRenderer.invoke(IPC.watchersList),
+  addWatcher: (conversationId: string, path: string, kind: string, prompt: string) =>
+    ipcRenderer.invoke(IPC.watchersAdd, { conversationId, path, kind, prompt }),
+  setWatcherEnabled: (id: string, enabled: boolean) =>
+    ipcRenderer.invoke(IPC.watchersSetEnabled, { id, enabled }),
+  removeWatcher: (id: string) => ipcRenderer.invoke(IPC.watchersRemove, { id }),
   groupInterrupt: (groupId: string) =>
     ipcRenderer.invoke(IPC.sessionGroupInterrupt, { groupId }),
   renameConversation: (id: string, title: string) =>

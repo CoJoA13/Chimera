@@ -12,6 +12,7 @@ import { CwdButton } from './components/chat/CwdButton'
 import { PersonaButton } from './components/chat/PersonaButton'
 import { ControlRoom } from './components/control/ControlRoom'
 import { TemplateButton } from './components/chat/TemplateButton'
+import { GroupMembersPopover } from './components/chat/GroupMembersPopover'
 import { PermissionDialog } from './components/permissions/PermissionDialog'
 import { SettingsModal } from './components/settings/SettingsModal'
 
@@ -55,6 +56,7 @@ export default function App() {
               <PermissionModeBadge />
             </>
           )}
+          {activeView === 'chat' && activeIsGroup && <GroupMembersPopover />}
           {activeView === 'chat' && activeIsGroup && groupMemberNames && (
             <span className="truncate text-xs text-slate-500">{groupMemberNames}</span>
           )}

@@ -9,6 +9,14 @@ import { IPC } from '../../shared/ipc'
 import { MODEL_CATALOG } from '../../shared/models'
 import { getProvider } from '../providers/registry'
 import type { SessionManager } from './sessions'
+import type { WatcherManager } from '../watcherManager'
+import {
+  listWatchers,
+  addWatcher,
+  setWatcherEnabled,
+  removeWatcher,
+  removeWatchersFor
+} from '../store/watchers'
 import {
   listConversations,
   createConversation,
@@ -70,7 +78,7 @@ const transportSchema = z.union([
   })
 ])
 
-export function registerIpc(manager: SessionManager): void {
+export function registerIpc(manager: SessionManager, watchers?: WatcherManager): void {
   // conversations
   ipcMain.handle(IPC.conversationList, () => listConversations())
   ipcMain.handle(IPC.conversationCreate, (_e, payload: unknown) => {
@@ -124,6 +132,74 @@ export function registerIpc(manager: SessionManager): void {
     return { ...group, groupMembers: undefined }
   })
 
+  const memberSpecSchema = z.object({
+    provider: providerSchema,
+    model: z.string().min(1),
+    title: z.string().min(1).max(60),
+    personaName: z.string().max(60).nullish(),
+    personaPrompt: z.string().max(2000).nullish()
+  })
+  ipcMain.handle(IPC.conversationAddMember, (_e, payload: unknown) => {
+    const { groupId, member } = z
+      .object({ groupId: idSchema, member: memberSpecSchema })
+      .parse(payload)
+    const group = getConversation(groupId)
+    if (!group || group.kind !== 'group') throw new Error('Not a group conversation')
+    if (
+      listGroupMembers(groupId).some(
+        (m) => m.title.toLowerCase() === member.title.trim().toLowerCase()
+      )
+    ) {
+      throw new Error(`A member named "${member.title}" already exists in this group`)
+    }
+    const memberConv = createConversation(member.provider, member.model, {
+      title: member.title.trim(),
+      groupId,
+      personaName: member.personaName ?? null,
+      personaPrompt: member.personaPrompt ?? null
+    })
+    manager.registerConversation(memberConv.id)
+  })
+  ipcMain.handle(IPC.conversationRemoveMember, async (_e, payload: unknown) => {
+    const { memberId } = z.object({ memberId: idSchema }).parse(payload)
+    const member = getConversation(memberId)
+    if (!member?.groupId) throw new Error('Not a group member')
+    if (listGroupMembers(member.groupId).length <= 1) {
+      throw new Error('A group needs at least one member — delete the group instead')
+    }
+    await manager.dispose(memberId)
+    manager.unregisterConversation(memberId)
+    clearTranscript(memberId)
+    deleteMemory(memberId)
+    removeSchedulesFor(memberId)
+    removeWatchersFor(memberId)
+    deleteConversation(memberId)
+  })
+
+  // watchers
+  ipcMain.handle(IPC.watchersList, () => listWatchers())
+  ipcMain.handle(IPC.watchersAdd, (_e, payload: unknown) => {
+    const { conversationId, path, kind, prompt } = z
+      .object({
+        conversationId: idSchema,
+        path: z.string().min(1),
+        kind: z.enum(['files', 'git']),
+        prompt: z.string().min(1)
+      })
+      .parse(payload)
+    addWatcher(conversationId, path, kind, prompt)
+    watchers?.reload()
+  })
+  ipcMain.handle(IPC.watchersSetEnabled, (_e, payload: unknown) => {
+    const { id, enabled } = z.object({ id: idSchema, enabled: z.boolean() }).parse(payload)
+    setWatcherEnabled(id, enabled)
+    watchers?.reload()
+  })
+  ipcMain.handle(IPC.watchersRemove, (_e, payload: unknown) => {
+    removeWatcher(z.object({ id: idSchema }).parse(payload).id)
+    watchers?.reload()
+  })
+
   ipcMain.handle(IPC.sessionGroupSend, (_e, payload: unknown) => {
     const { groupId, text } = z
       .object({ groupId: idSchema, text: z.string().min(1) })
@@ -148,6 +224,7 @@ export function registerIpc(manager: SessionManager): void {
       clearTranscript(member.id)
       deleteMemory(member.id)
       removeSchedulesFor(member.id)
+      removeWatchersFor(member.id)
       deleteConversation(member.id)
     }
     await manager.dispose(id)
@@ -155,7 +232,9 @@ export function registerIpc(manager: SessionManager): void {
     clearTranscript(id)
     deleteMemory(id)
     removeSchedulesFor(id)
+    removeWatchersFor(id)
     deleteConversation(id)
+    watchers?.reload()
   })
 
   // sessions

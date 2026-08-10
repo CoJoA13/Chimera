@@ -46,6 +46,26 @@ export interface ChimeraApi {
     persona?: { name: string; prompt: string } | null
   ): Promise<ConversationRecord>
   createGroup(name: string, members: GroupMemberSpec[]): Promise<ConversationRecord>
+  addGroupMember(groupId: string, member: GroupMemberSpec): Promise<void>
+  removeGroupMember(memberId: string): Promise<void>
+  listWatchers(): Promise<
+    {
+      id: string
+      conversationId: string
+      path: string
+      kind: 'files' | 'git'
+      prompt: string
+      enabled: boolean
+    }[]
+  >
+  addWatcher(
+    conversationId: string,
+    path: string,
+    kind: 'files' | 'git',
+    prompt: string
+  ): Promise<void>
+  setWatcherEnabled(id: string, enabled: boolean): Promise<void>
+  removeWatcher(id: string): Promise<void>
   groupSend(groupId: string, text: string): Promise<void>
   groupInterrupt(groupId: string): Promise<void>
   renameConversation(id: string, title: string): Promise<void>
@@ -177,6 +197,12 @@ export const IPC = {
   conversationSetCwd: 'conversation:setCwd',
   conversationSetPersona: 'conversation:setPersona',
   conversationCreateGroup: 'conversation:createGroup',
+  conversationAddMember: 'conversation:addMember',
+  conversationRemoveMember: 'conversation:removeMember',
+  watchersList: 'watchers:list',
+  watchersAdd: 'watchers:add',
+  watchersSetEnabled: 'watchers:setEnabled',
+  watchersRemove: 'watchers:remove',
   sessionGroupSend: 'session:groupSend',
   sessionGroupInterrupt: 'session:groupInterrupt',
   uiFocusConversation: 'ui:focusConversation',

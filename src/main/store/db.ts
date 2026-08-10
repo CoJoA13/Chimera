@@ -103,6 +103,18 @@ const MIGRATIONS: string[] = [
     cost REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (day, conversation_id)
   );
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS watchers (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_state TEXT,
+    created_at INTEGER NOT NULL
+  );
   `
 ]
 

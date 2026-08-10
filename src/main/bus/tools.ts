@@ -1,6 +1,14 @@
 import { z } from 'zod'
 import { BusCore, DEFAULT_AWAIT_SECONDS, MAX_AWAIT_SECONDS } from './BusCore'
 import { readMemory, saveMemory } from '../store/memory'
+import {
+  addSchedule,
+  listSchedules,
+  removeSchedule,
+  type Cadence
+} from '../store/schedules'
+
+const MAX_SCHEDULES_PER_SESSION = 10
 
 export interface BusToolResult {
   [key: string]: unknown
@@ -196,6 +204,80 @@ export function busToolDefs(core: BusCore, callerLocalId: string): BusToolDef[] 
         } catch (err) {
           return fail(err instanceof Error ? err.message : String(err))
         }
+      }
+    },
+    {
+      name: 'create_schedule',
+      description:
+        'Schedule a recurring prompt to YOURSELF (this session). Use when the user asks you to check/do something regularly. Provide either daily_time ("HH:MM") or every_hours.',
+      schema: {
+        prompt: z.string().describe('The prompt that will be sent to you on schedule'),
+        daily_time: z
+          .string()
+          .regex(/^\d{2}:\d{2}$/)
+          .optional()
+          .describe('Run daily at this local time, e.g. "08:30"'),
+        every_hours: z.number().min(1).max(168).optional().describe('Or: run every N hours')
+      },
+      handler: async (raw): Promise<BusToolResult> => {
+        const args = raw as unknown as {
+          prompt: string
+          daily_time?: string
+          every_hours?: number
+        }
+        debug(callerLocalId, 'create_schedule', args)
+        if (callerLocalId === 'control-room') return fail('The control room cannot hold schedules')
+        if (!args.daily_time && !args.every_hours) {
+          return fail('Provide daily_time or every_hours')
+        }
+        const mine = listSchedules().filter((s) => s.conversationId === callerLocalId)
+        if (mine.length >= MAX_SCHEDULES_PER_SESSION) {
+          return fail(`Schedule limit reached (${MAX_SCHEDULES_PER_SESSION}). Delete one first.`)
+        }
+        const cadence: Cadence = args.daily_time
+          ? { type: 'daily', time: args.daily_time }
+          : { type: 'interval', minutes: (args.every_hours as number) * 60 }
+        const record = addSchedule(callerLocalId, args.prompt, cadence)
+        return ok({
+          schedule_id: record.id,
+          next_run: new Date(record.nextRunAt).toISOString(),
+          note: 'Schedules run while the Chimera app is open.'
+        })
+      }
+    },
+    {
+      name: 'list_schedules',
+      description: 'List the recurring schedules attached to this session.',
+      schema: {},
+      handler: async (): Promise<BusToolResult> => {
+        debug(callerLocalId, 'list_schedules', {})
+        const mine = listSchedules().filter((s) => s.conversationId === callerLocalId)
+        return ok({
+          schedules: mine.map((s) => ({
+            schedule_id: s.id,
+            prompt: s.prompt,
+            cadence: s.cadence,
+            enabled: s.enabled,
+            next_run: new Date(s.nextRunAt).toISOString()
+          }))
+        })
+      }
+    },
+    {
+      name: 'delete_schedule',
+      description: 'Delete one of YOUR schedules by schedule_id.',
+      schema: {
+        schedule_id: z.string().describe('From list_schedules or create_schedule')
+      },
+      handler: async (raw): Promise<BusToolResult> => {
+        const args = raw as unknown as { schedule_id: string }
+        debug(callerLocalId, 'delete_schedule', args)
+        const mine = listSchedules().find(
+          (s) => s.id === args.schedule_id && s.conversationId === callerLocalId
+        )
+        if (!mine) return fail('No such schedule on this session')
+        removeSchedule(args.schedule_id)
+        return ok({ status: 'deleted' })
       }
     },
     {

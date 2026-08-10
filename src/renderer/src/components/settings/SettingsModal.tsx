@@ -6,8 +6,17 @@ import { ConnectorsPane } from './ConnectorsPane'
 import { PluginsPane } from './PluginsPane'
 import { SchedulesPane } from './SchedulesPane'
 import { UsagePane } from './UsagePane'
+import { WatchersPane } from './WatchersPane'
 
-const TABS = ['Providers', 'MCP Servers', 'Connectors', 'Plugins', 'Schedules', 'Usage'] as const
+const TABS = [
+  'Providers',
+  'MCP Servers',
+  'Connectors',
+  'Plugins',
+  'Schedules',
+  'Watchers',
+  'Usage'
+] as const
 
 export function SettingsModal() {
   const open = useChat((s) => s.settingsOpen)
@@ -107,6 +116,7 @@ export function SettingsModal() {
             {tab === 'Connectors' && <ConnectorsPane />}
             {tab === 'Plugins' && <PluginsPane />}
             {tab === 'Schedules' && <SchedulesPane />}
+            {tab === 'Watchers' && <WatchersPane />}
             {tab === 'Usage' && <UsagePane />}
           </div>
         </div>

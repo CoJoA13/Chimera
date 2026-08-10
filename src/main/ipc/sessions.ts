@@ -542,12 +542,16 @@ export class SessionManager {
     const contexts = new Map<string, string>()
     for (const member of targets) {
       const rows = loadTranscriptSince(groupId, getMemberLastSeq(member.id))
-      const lines: string[] = []
+      let lines: string[] = []
       for (const { event } of rows) {
         if (event.type === 'user.message') lines.push(`User: ${event.text}`)
         else if (event.type === 'text.done' && event.memberName && event.memberName !== member.title) {
           lines.push(`${event.memberName}: ${event.text}`)
         }
+      }
+      // New/long-absent members: cap catch-up so the prompt stays sane.
+      if (lines.length > 40) {
+        lines = [`(…${lines.length - 40} earlier room messages omitted…)`, ...lines.slice(-40)]
       }
       contexts.set(
         member.id,

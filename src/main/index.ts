@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { registerIpc } from './ipc/register'
 import { SessionManager } from './ipc/sessions'
 import { startScheduler } from './scheduler'
+import { WatcherManager } from './watcherManager'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -45,9 +46,11 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  registerIpc(sessionManager)
+  const watcherManager = new WatcherManager(sessionManager)
+  registerIpc(sessionManager, watcherManager)
   sessionManager.initBusDirectory()
   startScheduler(sessionManager)
+  watcherManager.start()
   createWindow()
 
   app.on('activate', () => {
