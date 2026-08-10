@@ -1,0 +1,111 @@
+import { useEffect, useRef } from 'react'
+import { AlertTriangle } from 'lucide-react'
+import { useChat, type Block } from '../../stores/chat'
+import { MarkdownBlock } from './MarkdownBlock'
+import { ToolCallCard } from './ToolCallCard'
+import { ThinkingBlock } from './ThinkingBlock'
+import { BusMessageCard } from './BusMessageCard'
+
+function renderBlock(block: Block) {
+  switch (block.kind) {
+    case 'user':
+      return (
+        <div className="my-3 flex justify-end">
+          <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-sky-900/50 px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+            {block.text}
+          </div>
+        </div>
+      )
+    case 'assistant':
+      return (
+        <div className="my-2">
+          <MarkdownBlock text={block.text} />
+          {block.streaming && (
+            <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-slate-400 align-text-bottom" />
+          )}
+        </div>
+      )
+    case 'thinking':
+      return <ThinkingBlock text={block.text} streaming={block.streaming} />
+    case 'tool':
+      return (
+        <ToolCallCard
+          toolName={block.toolName}
+          input={block.input}
+          output={block.output}
+          isError={block.isError}
+          done={block.done}
+        />
+      )
+    case 'footer':
+      return (
+        <div className="my-2 flex items-center gap-3 text-xs text-slate-600">
+          {block.isError ? (
+            <span className="flex items-center gap-1 text-red-400">
+              <AlertTriangle size={12} />
+              {block.errorMessage ?? 'Turn failed'}
+            </span>
+          ) : (
+            <>
+              {block.usage && (
+                <span>
+                  {block.usage.inputTokens.toLocaleString()} in /{' '}
+                  {block.usage.outputTokens.toLocaleString()} out
+                </span>
+              )}
+              {block.costUsd !== undefined && <span>${block.costUsd.toFixed(4)}</span>}
+              {block.durationMs !== undefined && (
+                <span>{(block.durationMs / 1000).toFixed(1)}s</span>
+              )}
+            </>
+          )}
+        </div>
+      )
+    case 'error':
+      return (
+        <div className="my-3 flex items-center gap-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+          <AlertTriangle size={15} />
+          {block.text}
+        </div>
+      )
+    case 'bus':
+      return (
+        <BusMessageCard
+          direction={block.direction}
+          peerLocalId={block.peerLocalId}
+          text={block.text}
+          isReply={block.isReply}
+        />
+      )
+  }
+}
+
+const EMPTY_BLOCKS: Block[] = []
+
+export function ChatView() {
+  const blocks = useChat((s) =>
+    s.activeConvId ? (s.blocksByConv[s.activeConvId] ?? EMPTY_BLOCKS) : EMPTY_BLOCKS
+  )
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+  }, [blocks])
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4">
+      <div className="mx-auto max-w-3xl py-6">
+        {blocks.length === 0 && (
+          <div className="mt-24 text-center text-slate-600">
+            <p className="text-2xl font-light">Chimera</p>
+            <p className="mt-2 text-sm">Start a conversation with Claude.</p>
+          </div>
+        )}
+        {blocks.map((block) => (
+          <div key={block.id}>{renderBlock(block)}</div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  )
+}

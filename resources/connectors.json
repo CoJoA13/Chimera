@@ -1,0 +1,66 @@
+[
+  {
+    "id": "github",
+    "name": "GitHub",
+    "description": "Repos, issues, PRs, and code search via GitHub's official remote MCP server.",
+    "transport": { "type": "http", "url": "https://api.githubcopilot.com/mcp/" },
+    "docsUrl": "https://github.com/github/github-mcp-server",
+    "authNote": "Uses MCP OAuth on first connection."
+  },
+  {
+    "id": "linear",
+    "name": "Linear",
+    "description": "Create and manage Linear issues, projects, and cycles.",
+    "transport": { "type": "sse", "url": "https://mcp.linear.app/sse" },
+    "docsUrl": "https://linear.app/docs/mcp",
+    "authNote": "Uses MCP OAuth on first connection."
+  },
+  {
+    "id": "notion",
+    "name": "Notion",
+    "description": "Search and edit Notion pages and databases.",
+    "transport": { "type": "http", "url": "https://mcp.notion.com/mcp" },
+    "docsUrl": "https://developers.notion.com/docs/mcp",
+    "authNote": "Uses MCP OAuth on first connection."
+  },
+  {
+    "id": "sentry",
+    "name": "Sentry",
+    "description": "Query errors, issues, and performance data from Sentry.",
+    "transport": { "type": "http", "url": "https://mcp.sentry.dev/mcp" },
+    "docsUrl": "https://docs.sentry.io/product/sentry-mcp/",
+    "authNote": "Uses MCP OAuth on first connection."
+  },
+  {
+    "id": "stripe",
+    "name": "Stripe",
+    "description": "Look up Stripe customers, payments, and subscriptions.",
+    "transport": { "type": "http", "url": "https://mcp.stripe.com" },
+    "docsUrl": "https://docs.stripe.com/mcp",
+    "authNote": "Uses MCP OAuth on first connection."
+  },
+  {
+    "id": "deepwiki",
+    "name": "DeepWiki",
+    "description": "Ask questions about any public GitHub repository.",
+    "transport": { "type": "http", "url": "https://mcp.deepwiki.com/mcp" },
+    "docsUrl": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+    "authNote": "No auth required."
+  },
+  {
+    "id": "huggingface",
+    "name": "Hugging Face",
+    "description": "Search models, datasets, and papers on the Hugging Face Hub.",
+    "transport": { "type": "http", "url": "https://huggingface.co/mcp" },
+    "docsUrl": "https://huggingface.co/settings/mcp",
+    "authNote": "Anonymous works; login unlocks more."
+  },
+  {
+    "id": "context7",
+    "name": "Context7",
+    "description": "Up-to-date documentation for thousands of libraries and frameworks.",
+    "transport": { "type": "http", "url": "https://mcp.context7.com/mcp" },
+    "docsUrl": "https://context7.com",
+    "authNote": "No auth required."
+  }
+]

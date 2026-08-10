@@ -1,0 +1,420 @@
+import { create } from 'zustand'
+import type { SessionEvent, Usage } from '../../../shared/events'
+import type { AuthStatus } from '../../../shared/ipc'
+import type { ModelInfo } from '../../../shared/models'
+import type { ConversationRecord } from '../../../shared/config-types'
+
+export type Block =
+  | { kind: 'user'; id: string; text: string }
+  | { kind: 'assistant'; id: string; text: string; streaming: boolean }
+  | { kind: 'thinking'; id: string; text: string; streaming: boolean }
+  | {
+      kind: 'tool'
+      id: string
+      toolName: string
+      input: unknown
+      output?: unknown
+      isError?: boolean
+      done: boolean
+    }
+  | {
+      kind: 'footer'
+      id: string
+      usage?: Usage
+      costUsd?: number
+      durationMs?: number
+      isError: boolean
+      errorMessage?: string
+    }
+  | { kind: 'error'; id: string; text: string }
+  | {
+      kind: 'bus'
+      id: string
+      direction: 'in' | 'out'
+      peerLocalId: string
+      text: string
+      isReply: boolean
+    }
+
+export interface PendingPermission {
+  requestId: string
+  toolName: string
+  input: unknown
+}
+
+interface ChatState {
+  conversations: ConversationRecord[]
+  activeConvId: string | null
+  /** conversationId -> live session localId */
+  sessionByConv: Record<string, string>
+  /** localId -> conversationId (event routing) */
+  convByLocal: Record<string, string>
+  /** conversationId -> status */
+  statusByConv: Record<string, 'idle' | 'streaming'>
+  blocksByConv: Record<string, Block[]>
+  hydrated: Record<string, boolean>
+  /** conversationId -> peer localId this conversation is awaiting a bus reply from */
+  busAwaitByConv: Record<string, string | null>
+  /** conversations with unseen inbound bus messages */
+  unreadBusByConv: Record<string, boolean>
+  permissions: PendingPermission[]
+  models: ModelInfo[]
+  auth: AuthStatus | null
+  codexAuth: AuthStatus | null
+  settingsOpen: boolean
+
+  init(): Promise<void>
+  refreshAuth(): Promise<void>
+  login(provider?: 'claude' | 'codex'): Promise<void>
+  newConversation(provider?: 'claude' | 'codex', model?: string): Promise<void>
+  selectConversation(id: string): Promise<void>
+  deleteConversation(id: string): Promise<void>
+  restartActiveSession(): Promise<void>
+  send(text: string): Promise<void>
+  interrupt(): Promise<void>
+  changeModel(model: string): Promise<void>
+  respondPermission(requestId: string, behavior: 'allow' | 'deny', always?: boolean): Promise<void>
+  setPermissionMode(
+    mode: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+  ): Promise<void>
+  setSettingsOpen(open: boolean): void
+  handleEvent(ev: SessionEvent): void
+}
+
+let initialized = false
+
+function updateBlocks(blocks: Block[], id: string, update: (b: Block) => Block): Block[] {
+  const idx = blocks.findIndex((b) => b.id === id)
+  if (idx === -1) return blocks
+  const next = blocks.slice()
+  next[idx] = update(next[idx])
+  return next
+}
+
+export const useChat = create<ChatState>((set, get) => ({
+  conversations: [],
+  activeConvId: null,
+  sessionByConv: {},
+  convByLocal: {},
+  statusByConv: {},
+  blocksByConv: {},
+  hydrated: {},
+  busAwaitByConv: {},
+  unreadBusByConv: {},
+  permissions: [],
+  models: [],
+  auth: null,
+  codexAuth: null,
+  settingsOpen: false,
+
+  async init() {
+    // Guard against StrictMode double-invocation and HMR remounts.
+    if (initialized) return
+    initialized = true
+    window.chimera.onSessionEvent((ev) => get().handleEvent(ev))
+    const [models, auth, codexAuth, conversations] = await Promise.all([
+      window.chimera.listModels(),
+      window.chimera.authStatus('claude'),
+      window.chimera.authStatus('codex'),
+      window.chimera.listConversations()
+    ])
+    set({ models, auth, codexAuth, conversations })
+    if (conversations.length > 0) {
+      await get().selectConversation(conversations[0].id)
+    } else {
+      await get().newConversation()
+    }
+  },
+
+  async refreshAuth() {
+    const [auth, codexAuth] = await Promise.all([
+      window.chimera.authStatus('claude'),
+      window.chimera.authStatus('codex')
+    ])
+    set({ auth, codexAuth })
+  },
+
+  async login(provider = 'claude') {
+    await window.chimera.launchLogin(provider)
+    const poll = setInterval(async () => {
+      const status = await window.chimera.authStatus(provider)
+      set(provider === 'claude' ? { auth: status } : { codexAuth: status })
+      if (status.state === 'authenticated') clearInterval(poll)
+    }, 3000)
+  },
+
+  async newConversation(provider = 'claude', model?: string) {
+    const defaultModel = provider === 'claude' ? 'claude-sonnet-5' : 'gpt-5.6-sol'
+    const conv = await window.chimera.createConversation(provider, model ?? defaultModel)
+    set((s) => ({ conversations: [conv, ...s.conversations] }))
+    await get().selectConversation(conv.id)
+  },
+
+  async selectConversation(id) {
+    set((st) => ({ activeConvId: id, unreadBusByConv: { ...st.unreadBusByConv, [id]: false } }))
+    const s = get()
+    if (!s.sessionByConv[id]) {
+      const { localId } = await window.chimera.startSession(id)
+      set((st) => ({
+        sessionByConv: { ...st.sessionByConv, [id]: localId },
+        convByLocal: { ...st.convByLocal, [localId]: id },
+        statusByConv: { ...st.statusByConv, [id]: st.statusByConv[id] ?? 'idle' }
+      }))
+      if (!s.hydrated[id]) {
+        const history = await window.chimera.sessionHistory(id)
+        if (history.length > 0) {
+          // Replay stored events into blocks before any live ones arrive.
+          const replayed = get()
+          const existing = replayed.blocksByConv[id] ?? []
+          if (existing.length === 0) {
+            for (const ev of history) get().handleEvent({ ...ev, localId })
+          }
+        }
+        set((st) => ({ hydrated: { ...st.hydrated, [id]: true } }))
+      }
+    }
+  },
+
+  async deleteConversation(id) {
+    const s = get()
+    const localId = s.sessionByConv[id]
+    if (localId) await window.chimera.disposeSession(localId)
+    await window.chimera.deleteConversation(id)
+    set((st) => {
+      const conversations = st.conversations.filter((c) => c.id !== id)
+      return { conversations }
+    })
+    if (get().activeConvId === id) {
+      const remaining = get().conversations
+      if (remaining.length > 0) await get().selectConversation(remaining[0].id)
+      else await get().newConversation()
+    }
+  },
+
+  async restartActiveSession() {
+    const { activeConvId, sessionByConv } = get()
+    if (!activeConvId) return
+    const oldLocal = sessionByConv[activeConvId]
+    const { localId } = await window.chimera.restartSession(activeConvId)
+    set((st) => {
+      const convByLocal = { ...st.convByLocal, [localId]: activeConvId }
+      if (oldLocal) delete convByLocal[oldLocal]
+      return {
+        sessionByConv: { ...st.sessionByConv, [activeConvId]: localId },
+        convByLocal
+      }
+    })
+  },
+
+  async send(text) {
+    const { activeConvId, sessionByConv, statusByConv, conversations } = get()
+    if (!activeConvId) return
+    const localId = sessionByConv[activeConvId]
+    if (!localId || statusByConv[activeConvId] === 'streaming') return
+
+    set((s) => ({
+      blocksByConv: {
+        ...s.blocksByConv,
+        [activeConvId]: [
+          ...(s.blocksByConv[activeConvId] ?? []),
+          { kind: 'user', id: crypto.randomUUID(), text }
+        ]
+      }
+    }))
+
+    // Auto-title from the first message.
+    const conv = conversations.find((c) => c.id === activeConvId)
+    if (conv && conv.title === 'New conversation') {
+      const title = text.length > 40 ? `${text.slice(0, 40)}…` : text
+      void window.chimera.renameConversation(activeConvId, title)
+      set((s) => ({
+        conversations: s.conversations.map((c) => (c.id === activeConvId ? { ...c, title } : c))
+      }))
+    }
+
+    await window.chimera.sendMessage(localId, text)
+  },
+
+  async interrupt() {
+    const { activeConvId, sessionByConv } = get()
+    if (!activeConvId) return
+    const localId = sessionByConv[activeConvId]
+    if (localId) await window.chimera.interrupt(localId)
+  },
+
+  async changeModel(model) {
+    const { activeConvId, sessionByConv } = get()
+    if (!activeConvId) return
+    set((s) => ({
+      conversations: s.conversations.map((c) => (c.id === activeConvId ? { ...c, model } : c))
+    }))
+    const localId = sessionByConv[activeConvId]
+    if (localId) await window.chimera.setModel(localId, model)
+  },
+
+  async respondPermission(requestId, behavior, always) {
+    set((s) => ({ permissions: s.permissions.filter((p) => p.requestId !== requestId) }))
+    await window.chimera.respondPermission({ requestId, behavior, always })
+  },
+
+  async setPermissionMode(mode) {
+    const { activeConvId, sessionByConv } = get()
+    if (!activeConvId) return
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === activeConvId ? { ...c, permissionMode: mode } : c
+      )
+    }))
+    await window.chimera.setPermissionMode(activeConvId, mode)
+    // Codex sessions restart with a new localId; re-sync the mapping.
+    const conv = get().conversations.find((c) => c.id === activeConvId)
+    if (conv?.provider === 'codex') {
+      const oldLocal = sessionByConv[activeConvId]
+      const { localId } = await window.chimera.startSession(activeConvId)
+      set((st) => {
+        const convByLocal = { ...st.convByLocal, [localId]: activeConvId }
+        if (oldLocal && oldLocal !== localId) delete convByLocal[oldLocal]
+        return { sessionByConv: { ...st.sessionByConv, [activeConvId]: localId }, convByLocal }
+      })
+    }
+  },
+
+  setSettingsOpen(open) {
+    set({ settingsOpen: open })
+  },
+
+  handleEvent(ev) {
+    const s = get()
+    // Session localIds are conversation ids; the map only adds indirection for
+    // sessions this renderer started. Fall back to the id itself so events from
+    // bus-auto-started sessions still route.
+    const convId =
+      s.convByLocal[ev.localId] ??
+      (s.conversations.some((c) => c.id === ev.localId) ? ev.localId : undefined)
+    if (!convId) return
+    const blocks = s.blocksByConv[convId] ?? []
+    const setBlocks = (next: Block[]): void => {
+      set((st) => ({ blocksByConv: { ...st.blocksByConv, [convId]: next } }))
+    }
+
+    switch (ev.type) {
+      case 'turn.started':
+        set((st) => ({ statusByConv: { ...st.statusByConv, [convId]: 'streaming' } }))
+        break
+
+      case 'user.message':
+        setBlocks([...blocks, { kind: 'user', id: crypto.randomUUID(), text: ev.text }])
+        break
+
+      case 'text.delta':
+      case 'thinking.delta': {
+        const kind = ev.type === 'text.delta' ? 'assistant' : 'thinking'
+        const existing = blocks.find((b) => b.id === ev.blockId)
+        if (existing) {
+          setBlocks(
+            updateBlocks(blocks, ev.blockId, (b) =>
+              b.kind === 'assistant' || b.kind === 'thinking'
+                ? { ...b, text: b.text + ev.text }
+                : b
+            )
+          )
+        } else {
+          setBlocks([...blocks, { kind, id: ev.blockId, text: ev.text, streaming: true }])
+        }
+        break
+      }
+
+      case 'text.done':
+      case 'thinking.done': {
+        const kind = ev.type === 'text.done' ? 'assistant' : 'thinking'
+        const existing = blocks.find((b) => b.id === ev.blockId)
+        if (existing) {
+          setBlocks(
+            updateBlocks(blocks, ev.blockId, (b) =>
+              b.kind === 'assistant' || b.kind === 'thinking'
+                ? { ...b, text: ev.text, streaming: false }
+                : b
+            )
+          )
+        } else if (ev.text.trim()) {
+          setBlocks([...blocks, { kind, id: ev.blockId, text: ev.text, streaming: false }])
+        }
+        break
+      }
+
+      case 'tool.started':
+        setBlocks([
+          ...blocks,
+          { kind: 'tool', id: ev.toolUseId, toolName: ev.toolName, input: ev.input, done: false }
+        ])
+        break
+
+      case 'tool.output':
+        setBlocks(
+          updateBlocks(blocks, ev.toolUseId, (b) =>
+            b.kind === 'tool' ? { ...b, output: ev.output, isError: ev.isError, done: true } : b
+          )
+        )
+        break
+
+      case 'permission.request':
+        set((st) => ({
+          permissions: [
+            ...st.permissions,
+            { requestId: ev.requestId, toolName: ev.toolName, input: ev.input }
+          ]
+        }))
+        break
+
+      case 'turn.completed':
+        set((st) => ({ statusByConv: { ...st.statusByConv, [convId]: 'idle' } }))
+        setBlocks([
+          ...blocks,
+          {
+            kind: 'footer',
+            id: crypto.randomUUID(),
+            usage: ev.usage,
+            costUsd: ev.costUsd,
+            durationMs: ev.durationMs,
+            isError: ev.isError,
+            errorMessage: ev.errorMessage
+          }
+        ])
+        break
+
+      case 'bus.message':
+        setBlocks([
+          ...blocks,
+          {
+            kind: 'bus',
+            id: crypto.randomUUID(),
+            direction: ev.direction,
+            peerLocalId: ev.direction === 'in' ? ev.from : ev.to,
+            text: ev.text,
+            isReply: ev.inReplyTo !== undefined
+          }
+        ])
+        if (ev.direction === 'in' && convId !== s.activeConvId) {
+          set((st) => ({ unreadBusByConv: { ...st.unreadBusByConv, [convId]: true } }))
+        }
+        break
+
+      case 'bus.status':
+        set((st) => ({
+          busAwaitByConv: {
+            ...st.busAwaitByConv,
+            [convId]: ev.status === 'awaiting' ? (ev.peerLocalId ?? null) : null
+          }
+        }))
+        break
+
+      case 'session.error':
+        set((st) => ({ statusByConv: { ...st.statusByConv, [convId]: 'idle' } }))
+        setBlocks([...blocks, { kind: 'error', id: crypto.randomUUID(), text: ev.message }])
+        break
+
+      default:
+        break
+    }
+  }
+}))
