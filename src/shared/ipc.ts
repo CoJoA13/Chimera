@@ -104,8 +104,12 @@ export interface ChimeraApi {
   mcpImport(names: string[]): Promise<McpServerRecord[]>
 
   // plugins
-  listPlugins(): Promise<{ id: string; name: string; path: string; enabled: boolean }[]>
+  listPlugins(): Promise<
+    { id: string; name: string; path: string; enabled: boolean; gitUrl: string | null }[]
+  >
   addPlugin(): Promise<{ id: string; name: string } | null>
+  installPluginsFromGit(url: string): Promise<{ id: string; name: string }[]>
+  updatePlugin(id: string): Promise<void>
   setPluginEnabled(id: string, enabled: boolean): Promise<void>
   removePlugin(id: string): Promise<void>
 
@@ -296,6 +300,8 @@ export const IPC = {
   mcpImport: 'mcp:import',
   pluginsList: 'plugins:list',
   pluginsAdd: 'plugins:add',
+  pluginsAddFromGit: 'plugins:addFromGit',
+  pluginsUpdate: 'plugins:update',
   pluginsSetEnabled: 'plugins:setEnabled',
   pluginsRemove: 'plugins:remove',
   connectorsList: 'connectors:list',

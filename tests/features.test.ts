@@ -212,6 +212,45 @@ describe('skill distillation', () => {
   })
 })
 
+describe('github plugin installs', () => {
+  it('normalizes repo inputs', async () => {
+    const { normalizeGitUrl } = await import('../src/main/store/plugins')
+    expect(normalizeGitUrl('owner/repo')).toEqual({
+      url: 'https://github.com/owner/repo.git',
+      dirName: 'owner-repo'
+    })
+    expect(normalizeGitUrl('https://github.com/o/r.git/')).toEqual({
+      url: 'https://github.com/o/r.git',
+      dirName: 'o-r'
+    })
+    expect(normalizeGitUrl('https://github.com/o/r')).toEqual({
+      url: 'https://github.com/o/r.git',
+      dirName: 'o-r'
+    })
+    expect(() => normalizeGitUrl('https://gitlab.com/o/r')).toThrow(/github/)
+    expect(() => normalizeGitUrl('not a repo')).toThrow()
+  })
+
+  it('registers plugins with git source, dedupes by path, cleans repo on removal', async () => {
+    const { mkdtempSync, mkdirSync: mk, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { addPlugin, listPlugins, removePlugin } = await import('../src/main/store/plugins')
+    const dir = mkdtempSync(join(tmpdir(), 'chimera-plugin-'))
+    mk(join(dir, '.claude-plugin'), { recursive: true })
+    writeFileSync(
+      join(dir, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'test-git-plugin' })
+    )
+    const a = addPlugin(dir, 'https://github.com/x/y.git')
+    const b = addPlugin(dir, 'https://github.com/x/y.git')
+    expect(a.id).toBe(b.id) // deduped by path
+    expect(listPlugins().find((p) => p.id === a.id)?.gitUrl).toContain('github.com/x/y')
+    removePlugin(a.id)
+    expect(listPlugins().some((p) => p.id === a.id)).toBe(false)
+  })
+})
+
 describe('templates', () => {
   it('captures a single conversation with persona', () => {
     const conv = createConversation('claude', 'claude-sonnet-5', {

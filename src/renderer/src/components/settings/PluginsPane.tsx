@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react'
-import { Puzzle, Trash2, FolderPlus } from 'lucide-react'
+import { Puzzle, Trash2, FolderPlus, GitBranch, Loader2, RefreshCw, Check } from 'lucide-react'
 
 interface PluginRow {
   id: string
   name: string
   path: string
   enabled: boolean
+  gitUrl: string | null
 }
 
 export function PluginsPane() {
   const [plugins, setPlugins] = useState<PluginRow[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [gitUrl, setGitUrl] = useState('')
+  const [installing, setInstalling] = useState(false)
+  const [updating, setUpdating] = useState<string | null>(null)
+  const [updated, setUpdated] = useState<string | null>(null)
 
   const refresh = async (): Promise<void> => {
     setPlugins(await window.chimera.listPlugins())
@@ -20,7 +25,7 @@ export function PluginsPane() {
     void refresh()
   }, [])
 
-  const add = async (): Promise<void> => {
+  const addFolder = async (): Promise<void> => {
     setError(null)
     try {
       const added = await window.chimera.addPlugin()
@@ -30,19 +35,74 @@ export function PluginsPane() {
     }
   }
 
+  const installFromGit = async (): Promise<void> => {
+    if (!gitUrl.trim() || installing) return
+    setError(null)
+    setInstalling(true)
+    try {
+      const installed = await window.chimera.installPluginsFromGit(gitUrl.trim())
+      setGitUrl('')
+      await refresh()
+      if (installed.length > 1) {
+        setError(null)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  const update = async (id: string): Promise<void> => {
+    setError(null)
+    setUpdating(id)
+    try {
+      await window.chimera.updatePlugin(id)
+      setUpdated(id)
+      setTimeout(() => setUpdated(null), 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUpdating(null)
+    }
+  }
+
   return (
     <div className="space-y-3">
       <p className="text-xs text-slate-500">
         Claude Code plugins (skills, agents, commands, hooks) loaded into every Claude session.
-        Applies to sessions started after the change.
+        Changes apply to sessions started afterwards. Only install plugins from sources you trust —
+        they run with the agent's permissions.
       </p>
-      <button
-        onClick={() => void add()}
-        className="flex items-center gap-1.5 rounded-md bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600"
-      >
-        <FolderPlus size={14} /> Add plugin folder…
-      </button>
+
+      <div className="flex gap-1.5">
+        <div className="relative flex-1">
+          <GitBranch size={13} className="absolute top-2.5 left-2 text-slate-500" />
+          <input
+            value={gitUrl}
+            onChange={(e) => setGitUrl(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void installFromGit()}
+            placeholder="github.com/owner/repo  or  owner/repo"
+            className="w-full rounded-md border border-[#30363d] bg-[#161b22] py-1.5 pr-2 pl-7 font-mono text-xs"
+          />
+        </div>
+        <button
+          onClick={() => void installFromGit()}
+          disabled={!gitUrl.trim() || installing}
+          className="flex items-center gap-1.5 rounded-md bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-600 disabled:opacity-40"
+        >
+          {installing ? <Loader2 size={14} className="animate-spin" /> : 'Install'}
+        </button>
+        <button
+          onClick={() => void addFolder()}
+          title="Add a local plugin folder"
+          className="flex items-center gap-1.5 rounded-md border border-[#30363d] px-3 py-1.5 text-sm text-slate-300 hover:bg-[#21262d]"
+        >
+          <FolderPlus size={14} />
+        </button>
+      </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
+
       <div className="space-y-1.5">
         {plugins.length === 0 && <p className="text-sm text-slate-500">No plugins installed.</p>}
         {plugins.map((p) => (
@@ -52,9 +112,34 @@ export function PluginsPane() {
           >
             <Puzzle size={14} className="shrink-0 text-slate-500" />
             <div className="min-w-0 flex-1">
-              <div className="text-sm text-slate-200">{p.name}</div>
-              <div className="truncate font-mono text-xs text-slate-500">{p.path}</div>
+              <div className="flex items-center gap-1.5 text-sm text-slate-200">
+                {p.name}
+                {p.gitUrl && (
+                  <span title={p.gitUrl}>
+                    <GitBranch size={11} className="text-slate-500" />
+                  </span>
+                )}
+              </div>
+              <div className="truncate font-mono text-xs text-slate-500">
+                {p.gitUrl ?? p.path}
+              </div>
             </div>
+            {p.gitUrl && (
+              <button
+                onClick={() => void update(p.id)}
+                disabled={updating !== null}
+                title="Pull latest from the repo"
+                className="text-slate-500 hover:text-sky-300 disabled:opacity-40"
+              >
+                {updating === p.id ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : updated === p.id ? (
+                  <Check size={14} className="text-emerald-400" />
+                ) : (
+                  <RefreshCw size={14} />
+                )}
+              </button>
+            )}
             <label className="flex items-center gap-1 text-xs text-slate-400">
               <input
                 type="checkbox"

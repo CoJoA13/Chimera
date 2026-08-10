@@ -148,6 +148,9 @@ const MIGRATIONS: string[] = [
   `,
   `
   ALTER TABLE permission_rules ADD COLUMN conversation_id TEXT;
+  `,
+  `
+  ALTER TABLE plugins ADD COLUMN git_url TEXT;
   `
 ]
 

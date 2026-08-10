@@ -75,6 +75,8 @@ const api: ChimeraApi = {
 
   listPlugins: () => ipcRenderer.invoke(IPC.pluginsList),
   addPlugin: () => ipcRenderer.invoke(IPC.pluginsAdd),
+  installPluginsFromGit: (url: string) => ipcRenderer.invoke(IPC.pluginsAddFromGit, { url }),
+  updatePlugin: (id: string) => ipcRenderer.invoke(IPC.pluginsUpdate, { id }),
   setPluginEnabled: (id: string, enabled: boolean) =>
     ipcRenderer.invoke(IPC.pluginsSetEnabled, { id, enabled }),
   removePlugin: (id: string) => ipcRenderer.invoke(IPC.pluginsRemove, { id }),

@@ -4,7 +4,14 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { ConnectorEntry } from '../../shared/ipc'
 import type { McpTransport } from '../../shared/config-types'
-import { listPlugins, addPlugin, setPluginEnabled, removePlugin } from '../store/plugins'
+import {
+  listPlugins,
+  addPlugin,
+  setPluginEnabled,
+  removePlugin,
+  installPluginsFromGit,
+  updatePlugin
+} from '../store/plugins'
 import { IPC } from '../../shared/ipc'
 import { MODEL_CATALOG } from '../../shared/models'
 import { getProvider } from '../providers/registry'
@@ -396,6 +403,13 @@ export function registerIpc(
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return addPlugin(result.filePaths[0])
+  })
+  ipcMain.handle(IPC.pluginsAddFromGit, (_e, payload: unknown) => {
+    const { url } = z.object({ url: z.string().min(3).max(300) }).parse(payload)
+    return installPluginsFromGit(url)
+  })
+  ipcMain.handle(IPC.pluginsUpdate, (_e, payload: unknown) => {
+    return updatePlugin(z.object({ id: idSchema }).parse(payload).id)
   })
   ipcMain.handle(IPC.pluginsSetEnabled, (_e, payload: unknown) => {
     const { id, enabled } = z.object({ id: idSchema, enabled: z.boolean() }).parse(payload)
