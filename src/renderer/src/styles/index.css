@@ -84,3 +84,10 @@ body {
 .chat-md hr {
   @apply my-4 border-[#30363d];
 }
+
+.chimera-shiki pre {
+  @apply m-0 rounded-lg p-3;
+}
+.chimera-shiki code {
+  @apply bg-transparent p-0 text-inherit;
+}

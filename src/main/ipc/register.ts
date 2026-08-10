@@ -26,7 +26,8 @@ import {
   setConversationPersona,
   listGroupMembers
 } from '../store/conversations'
-import { clearTranscript } from '../store/transcript'
+import { clearTranscript, copyTranscript, searchTranscripts } from '../store/transcript'
+import { createForkOf } from '../store/conversations'
 import { listBusMessages } from '../store/busHistory'
 import {
   listTemplates,
@@ -496,6 +497,36 @@ export function registerIpc(manager: SessionManager, watchers?: WatcherManager):
   ipcMain.handle(IPC.memoryGet, (_e, payload: unknown) => {
     const { conversationId } = z.object({ conversationId: idSchema }).parse(payload)
     return readMemory(conversationId)
+  })
+
+  // fork
+  ipcMain.handle(IPC.conversationFork, (_e, payload: unknown) => {
+    const { conversationId } = z.object({ conversationId: idSchema }).parse(payload)
+    const fork = createForkOf(conversationId)
+    copyTranscript(conversationId, fork.id)
+    manager.registerConversation(fork.id)
+    return fork
+  })
+
+  // search
+  ipcMain.handle(IPC.searchAll, (_e, payload: unknown) => {
+    const { query } = z.object({ query: z.string().min(2).max(200) }).parse(payload)
+    return searchTranscripts(query).map((hit) => ({
+      ...hit,
+      title: getConversation(hit.conversationId)?.title ?? 'deleted conversation'
+    }))
+  })
+
+  // generic settings
+  ipcMain.handle(IPC.settingsGet, (_e, payload: unknown) => {
+    const { key } = z.object({ key: z.string().min(1).max(60) }).parse(payload)
+    return getSetting<unknown>(key, null)
+  })
+  ipcMain.handle(IPC.settingsSet, (_e, payload: unknown) => {
+    const { key, value } = z
+      .object({ key: z.string().min(1).max(60), value: z.unknown() })
+      .parse(payload)
+    setSetting(key, value)
   })
 
   // control room

@@ -95,6 +95,18 @@ const api: ChimeraApi = {
   setDailyBudget: (budgetUsd: number | null) =>
     ipcRenderer.invoke(IPC.usageSetBudget, { budgetUsd }),
   getMemory: (conversationId: string) => ipcRenderer.invoke(IPC.memoryGet, { conversationId }),
+  forkConversation: (conversationId: string) =>
+    ipcRenderer.invoke(IPC.conversationFork, { conversationId }),
+  searchAll: (query: string) => ipcRenderer.invoke(IPC.searchAll, { query }),
+  getSetting: (key: string) => ipcRenderer.invoke(IPC.settingsGet, { key }),
+  setSetting: (key: string, value: unknown) => ipcRenderer.invoke(IPC.settingsSet, { key, value }),
+  onConversationsChanged: (cb: () => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on(IPC.uiConversationsChanged, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.uiConversationsChanged, listener)
+    }
+  },
   busHistory: () => ipcRenderer.invoke(IPC.busHistory),
   runConference: (
     question: string,

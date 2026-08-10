@@ -48,6 +48,52 @@ export function loadTranscriptSince(
   return rows.map((r) => ({ seq: r.seq, event: JSON.parse(r.event_json) as SessionEvent }))
 }
 
+/** Duplicate a transcript (fork history) preserving order. */
+export function copyTranscript(sourceId: string, destId: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO transcript_cache (conversation_id, event_json)
+       SELECT ?, event_json FROM transcript_cache WHERE conversation_id = ? ORDER BY seq`
+    )
+    .run(destId, sourceId)
+}
+
+/** Case-insensitive text search over cached transcripts (user + assistant text). */
+export function searchTranscripts(
+  queryText: string,
+  limit = 20
+): { conversationId: string; snippet: string }[] {
+  const needle = queryText.toLowerCase()
+  const rows = getDb()
+    .prepare(
+      `SELECT conversation_id, event_json FROM transcript_cache
+       WHERE event_json LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT 500`
+    )
+    .all(`%${needle.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`) as unknown as {
+    conversation_id: string
+    event_json: string
+  }[]
+  const best = new Map<string, string>()
+  for (const row of rows) {
+    if (best.size >= limit) break
+    if (best.has(row.conversation_id)) continue
+    try {
+      const ev = JSON.parse(row.event_json) as { type: string; text?: string }
+      if ((ev.type !== 'user.message' && ev.type !== 'text.done') || !ev.text) continue
+      const idx = ev.text.toLowerCase().indexOf(needle)
+      if (idx === -1) continue
+      const start = Math.max(0, idx - 40)
+      best.set(
+        row.conversation_id,
+        (start > 0 ? '…' : '') + ev.text.slice(start, idx + needle.length + 60).replaceAll('\n', ' ')
+      )
+    } catch {
+      // skip unparseable rows
+    }
+  }
+  return [...best.entries()].map(([conversationId, snippet]) => ({ conversationId, snippet }))
+}
+
 export function latestSeq(conversationId: string): number {
   const row = getDb()
     .prepare('SELECT MAX(seq) s FROM transcript_cache WHERE conversation_id = ?')

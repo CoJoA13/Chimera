@@ -174,6 +174,13 @@ export interface ChimeraApi {
   // memory
   getMemory(conversationId: string): Promise<string>
 
+  // fork / search / settings
+  forkConversation(conversationId: string): Promise<ConversationRecord>
+  searchAll(query: string): Promise<{ conversationId: string; title: string; snippet: string }[]>
+  getSetting(key: string): Promise<unknown>
+  setSetting(key: string, value: unknown): Promise<void>
+  onConversationsChanged(cb: () => void): () => void
+
   // misc
   listModels(): Promise<ModelInfo[]>
   authStatus(provider: ProviderId): Promise<AuthStatus>
@@ -220,6 +227,11 @@ export const IPC = {
   usageSummary: 'usage:summary',
   usageSetBudget: 'usage:setBudget',
   memoryGet: 'memory:get',
+  conversationFork: 'conversation:fork',
+  searchAll: 'search:all',
+  settingsGet: 'settings:get',
+  settingsSet: 'settings:set',
+  uiConversationsChanged: 'ui:conversationsChanged',
   sessionInterrupt: 'session:interrupt',
   sessionSetModel: 'session:setModel',
   sessionDispose: 'session:dispose',

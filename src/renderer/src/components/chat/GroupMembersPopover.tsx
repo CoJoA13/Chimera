@@ -14,6 +14,8 @@ export function GroupMembersPopover() {
   const [title, setTitle] = useState('')
   const [persona, setPersona] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
 
   if (!active || active.kind !== 'group') return null
   const members = active.groupMembers ?? []
@@ -74,7 +76,36 @@ export function GroupMembersPopover() {
                   m.provider === 'claude' ? 'bg-orange-400/70' : 'bg-emerald-400/70'
                 }`}
               />
-              <span className="flex-1 truncate">{m.title}</span>
+              {renaming === m.id ? (
+                <input
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && renameValue.trim()) {
+                      void window.chimera
+                        .renameConversation(m.id, renameValue.trim())
+                        .then(() => {
+                          setRenaming(null)
+                          void refresh()
+                        })
+                    }
+                    if (e.key === 'Escape') setRenaming(null)
+                  }}
+                  autoFocus
+                  className="flex-1 rounded border border-[#30363d] bg-[#161b22] px-1.5 py-0.5 text-xs"
+                />
+              ) : (
+                <button
+                  onClick={() => {
+                    setRenaming(m.id)
+                    setRenameValue(m.title)
+                  }}
+                  className="flex-1 truncate text-left hover:text-sky-300"
+                  title="Click to rename (@-mention handle)"
+                >
+                  {m.title}
+                </button>
+              )}
               <button
                 onClick={() => void removeMember(m.id)}
                 className="text-slate-600 hover:text-red-400"

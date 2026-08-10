@@ -115,6 +115,9 @@ const MIGRATIONS: string[] = [
     last_state TEXT,
     created_at INTEGER NOT NULL
   );
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN fork_pending INTEGER NOT NULL DEFAULT 0;
   `
 ]
 

@@ -1,10 +1,10 @@
-import { useState } from 'react'
 import { MessageSquarePlus, Trash2, Settings, Network, Users } from 'lucide-react'
 import { useChat } from '../../stores/chat'
 import { NewConversationModal } from './NewConversationModal'
 
 export function Sidebar() {
-  const [newOpen, setNewOpen] = useState(false)
+  const newOpen = useChat((s) => s.newChatOpen)
+  const setNewOpen = useChat((s) => s.setNewChatOpen)
   const conversations = useChat((s) => s.conversations)
   const activeConvId = useChat((s) => s.activeConvId)
   const statusByConv = useChat((s) => s.statusByConv)

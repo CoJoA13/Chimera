@@ -15,6 +15,7 @@ interface Row {
   persona_prompt: string | null
   kind: string
   group_id: string | null
+  fork_pending: number
   created_at: number
   updated_at: number
 }
@@ -32,6 +33,7 @@ function toRecord(row: Row): ConversationRecord {
     personaPrompt: row.persona_prompt,
     kind: (row.kind as ConversationRecord['kind']) ?? 'single',
     groupId: row.group_id,
+    forkPending: row.fork_pending === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }
@@ -103,6 +105,7 @@ export function createConversation(
     personaPrompt: opts.personaPrompt ?? null,
     kind: opts.kind ?? 'single',
     groupId: opts.groupId ?? null,
+    forkPending: false,
     createdAt: now,
     updatedAt: now
   }
@@ -181,6 +184,30 @@ export function setConversationPersona(
   getDb()
     .prepare('UPDATE conversations SET persona_name = ?, persona_prompt = ? WHERE id = ?')
     .run(personaName, personaPrompt, id)
+}
+
+/** Create a fork of a Claude conversation: same provider session, new branch on first turn. */
+export function createForkOf(sourceId: string): ConversationRecord {
+  const source = getConversation(sourceId)
+  if (!source) throw new Error('Unknown conversation')
+  if (source.provider !== 'claude' || source.kind !== 'single' || !source.providerSessionId) {
+    throw new Error('Only started single Claude conversations can be forked')
+  }
+  const record = createConversation(source.provider, source.model, {
+    title: `⑂ ${source.title}`,
+    personaName: source.personaName,
+    personaPrompt: source.personaPrompt
+  })
+  getDb()
+    .prepare(
+      'UPDATE conversations SET provider_session_id = ?, cwd = ?, permission_mode = ?, fork_pending = 1 WHERE id = ?'
+    )
+    .run(source.providerSessionId, source.cwd, source.permissionMode, record.id)
+  return getConversation(record.id)!
+}
+
+export function clearForkPending(id: string): void {
+  getDb().prepare('UPDATE conversations SET fork_pending = 0 WHERE id = ?').run(id)
 }
 
 export function setConversationCwd(id: string, cwd: string): void {

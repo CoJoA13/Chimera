@@ -65,6 +65,9 @@ interface ChatState {
   auth: AuthStatus | null
   codexAuth: AuthStatus | null
   settingsOpen: boolean
+  paletteOpen: boolean
+  newChatOpen: boolean
+  onboardingOpen: boolean
   activeView: 'chat' | 'control'
   /** Reports agents sent to the Control Room (bus target: control-room). */
   controlInbound: { fromId: string; messageId: string; text: string; at: number }[]
@@ -100,6 +103,9 @@ interface ChatState {
     mode: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
   ): Promise<void>
   setSettingsOpen(open: boolean): void
+  setPaletteOpen(open: boolean): void
+  setNewChatOpen(open: boolean): void
+  finishOnboarding(): Promise<void>
   /** Refresh the list and select a conversation created outside the store. */
   adoptConversation(id: string): Promise<void>
   setActiveView(view: 'chat' | 'control'): void
@@ -131,6 +137,9 @@ export const useChat = create<ChatState>((set, get) => ({
   auth: null,
   codexAuth: null,
   settingsOpen: false,
+  paletteOpen: false,
+  newChatOpen: false,
+  onboardingOpen: false,
   activeView: 'chat',
   controlInbound: [],
 
@@ -141,6 +150,9 @@ export const useChat = create<ChatState>((set, get) => ({
     window.chimera.onSessionEvent((ev) => get().handleEvent(ev))
     window.chimera.onFocusConversation((conversationId) => {
       void get().selectConversation(conversationId)
+    })
+    window.chimera.onConversationsChanged(() => {
+      void window.chimera.listConversations().then((conversations) => set({ conversations }))
     })
     window.chimera.onControlRoomEvent((ev) => {
       if (ev.type === 'inbound') {
@@ -163,7 +175,8 @@ export const useChat = create<ChatState>((set, get) => ({
       window.chimera.authStatus('codex'),
       window.chimera.listConversations()
     ])
-    set({ models, auth, codexAuth, conversations })
+    const onboarded = await window.chimera.getSetting('onboarded')
+    set({ models, auth, codexAuth, conversations, onboardingOpen: onboarded !== true })
     if (conversations.length > 0) {
       await get().selectConversation(conversations[0].id)
     } else {
@@ -286,16 +299,7 @@ export const useChat = create<ChatState>((set, get) => ({
       }
     }))
 
-    // Auto-title from the first message.
     const conv = conversations.find((c) => c.id === activeConvId)
-    if (conv && conv.title === 'New conversation') {
-      const title = text.length > 40 ? `${text.slice(0, 40)}…` : text
-      void window.chimera.renameConversation(activeConvId, title)
-      set((s) => ({
-        conversations: s.conversations.map((c) => (c.id === activeConvId ? { ...c, title } : c))
-      }))
-    }
-
     if (conv?.kind === 'group') {
       set((st) => ({ statusByConv: { ...st.statusByConv, [activeConvId]: 'streaming' } }))
       await window.chimera.groupSend(activeConvId, text)
@@ -377,6 +381,19 @@ export const useChat = create<ChatState>((set, get) => ({
 
   setSettingsOpen(open) {
     set({ settingsOpen: open })
+  },
+
+  setPaletteOpen(open) {
+    set({ paletteOpen: open })
+  },
+
+  setNewChatOpen(open) {
+    set({ newChatOpen: open })
+  },
+
+  async finishOnboarding() {
+    set({ onboardingOpen: false })
+    await window.chimera.setSetting('onboarded', true)
   },
 
   async adoptConversation(id) {

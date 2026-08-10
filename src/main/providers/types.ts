@@ -31,6 +31,8 @@ export interface CreateSessionOptions {
   mcpServers?: McpServerRuntimeConfig[]
   plugins?: { type: 'local'; path: string }[]
   permissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+  /** With resume: branch into a new provider session instead of continuing. */
+  forkSession?: boolean
   onEvent: (ev: SessionEvent) => void
   onPermissionRequest?: (req: PermissionRequest) => Promise<PermissionDecision>
 }

@@ -89,6 +89,7 @@ class ClaudeSession implements ProviderSession {
       mcpServers,
       plugins: opts.plugins,
       resume: resumeSessionId,
+      forkSession: opts.forkSession,
       canUseTool: async (toolName, input, { suggestions }) => {
         if (!this.opts.onPermissionRequest) {
           // Phase 1 stub: auto-allow, but log so it is visible during development.

@@ -13,6 +13,9 @@ import { PersonaButton } from './components/chat/PersonaButton'
 import { ControlRoom } from './components/control/ControlRoom'
 import { TemplateButton } from './components/chat/TemplateButton'
 import { GroupMembersPopover } from './components/chat/GroupMembersPopover'
+import { ForkButton } from './components/chat/ForkButton'
+import { CommandPalette } from './components/palette/CommandPalette'
+import { OnboardingModal } from './components/onboarding/OnboardingModal'
 import { PermissionDialog } from './components/permissions/PermissionDialog'
 import { SettingsModal } from './components/settings/SettingsModal'
 
@@ -36,6 +39,26 @@ export default function App() {
 
   useEffect(() => {
     void init()
+    const onKeyDown = (e: KeyboardEvent): void => {
+      const mod = e.ctrlKey || e.metaKey
+      if (!mod) return
+      const state = useChat.getState()
+      if (e.key === 'k') {
+        e.preventDefault()
+        state.setPaletteOpen(!state.paletteOpen)
+      } else if (e.key === 'n') {
+        e.preventDefault()
+        state.setNewChatOpen(true)
+      } else if (/^[1-9]$/.test(e.key)) {
+        const conv = state.conversations[Number(e.key) - 1]
+        if (conv) {
+          e.preventDefault()
+          void state.selectConversation(conv.id)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -54,6 +77,7 @@ export default function App() {
               <CwdButton />
               <PersonaButton />
               <PermissionModeBadge />
+              <ForkButton />
             </>
           )}
           {activeView === 'chat' && activeIsGroup && <GroupMembersPopover />}
@@ -93,6 +117,8 @@ export default function App() {
       </div>
       <PermissionDialog />
       <SettingsModal />
+      <CommandPalette />
+      <OnboardingModal />
     </div>
   )
 }

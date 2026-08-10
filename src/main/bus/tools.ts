@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { BusCore, DEFAULT_AWAIT_SECONDS, MAX_AWAIT_SECONDS } from './BusCore'
 import { readMemory, saveMemory } from '../store/memory'
+import { storeArtifact } from '../store/artifacts'
 import {
   addSchedule,
   listSchedules,
@@ -201,6 +202,30 @@ export function busToolDefs(core: BusCore, callerLocalId: string): BusToolDef[] 
         try {
           saveMemory(callerLocalId, args.content)
           return ok({ status: 'saved', length: args.content.length })
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err))
+        }
+      }
+    },
+    {
+      name: 'send_artifact',
+      description:
+        'Send a FILE to another session over the bus (max 10MB). The file is copied to a stable path the recipient can read with its own tools.',
+      schema: {
+        target_id: z.string().describe('session_id of the recipient'),
+        path: z.string().describe('Absolute path of the file to send'),
+        note: z.string().optional().describe('What this file is / what to do with it')
+      },
+      handler: async (raw): Promise<BusToolResult> => {
+        const args = raw as unknown as { target_id: string; path: string; note?: string }
+        debug(callerLocalId, 'send_artifact', args)
+        try {
+          const { storedPath, size } = storeArtifact(args.path)
+          const text =
+            `[Artifact: ${storedPath} (${size} bytes, original: ${args.path})]` +
+            (args.note ? `\n${args.note}` : '\nRead it with your file tools.')
+          const messageId = core.send(callerLocalId, args.target_id, text, false)
+          return ok({ message_id: messageId, stored_path: storedPath })
         } catch (err) {
           return fail(err instanceof Error ? err.message : String(err))
         }

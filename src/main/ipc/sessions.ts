@@ -14,8 +14,11 @@ import {
   setProviderSessionId,
   touchConversation,
   setConversationModel,
-  setConversationPermissionMode
+  setConversationPermissionMode,
+  clearForkPending,
+  renameConversation
 } from '../store/conversations'
+import { generateTitle } from '../titles'
 import { enabledMcpForConversation } from '../store/mcp'
 import { isAlwaysAllowed, addAlwaysAllowRule } from '../store/permissions'
 import { enabledPluginPaths } from '../store/plugins'
@@ -451,12 +454,14 @@ export class SessionManager {
       model: conversation.model,
       cwd: conversation.cwd ?? undefined,
       permissionMode: conversation.permissionMode,
+      forkSession: conversation.forkPending || undefined,
       systemPromptAppend: BUS_INSTRUCTIONS + personaAppend + groupAppend + memoryAppend,
       mcpServers,
       plugins: conversation.provider === 'claude' ? enabledPluginPaths() : undefined,
       onEvent: (ev: SessionEvent) => {
         if (ev.type === 'session.registered') {
           setProviderSessionId(conversationId, ev.providerSessionId)
+          if (conversation.forkPending) clearForkPending(conversationId)
         }
         const live = this.sessions.get(localId)
         if (live) {
@@ -628,6 +633,16 @@ export class SessionManager {
     this.checkBudget()
     const live = this.get(localId)
     touchConversation(live.conversationId)
+    // First message in an untitled chat: generate a proper title in the background.
+    const conversation = getConversation(live.conversationId)
+    if (conversation?.title === 'New conversation' && !text.startsWith('[')) {
+      void generateTitle(text).then((title) => {
+        if (!title) return
+        renameConversation(live.conversationId, title)
+        const target = this.getTarget()
+        if (target && !target.isDestroyed()) target.send('ui:conversationsChanged')
+      })
+    }
     const label =
       attachments && attachments.length > 0
         ? `${text}\n[attached: ${attachments.map((a) => a.path.split('/').pop()).join(', ')}]`

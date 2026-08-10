@@ -26,6 +26,8 @@ export interface ConversationRecord {
   kind: 'single' | 'group'
   /** For member conversations: the group they belong to. */
   groupId: string | null
+  /** Fork created but not yet branched: first session start uses forkSession. */
+  forkPending: boolean
   /** Populated on kind='group' records when listing. */
   groupMembers?: { id: string; title: string; provider: ProviderId }[]
   createdAt: number
