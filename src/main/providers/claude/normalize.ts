@@ -82,6 +82,8 @@ export class ClaudeNormalizer {
    * blocks under their streamed id, or the UI renders the text twice.
    */
   private streamedBlocks = new Set<string>()
+  /** total_cost_usd is cumulative per session — track it to emit per-turn deltas. */
+  private lastTotalCost = 0
 
   constructor(
     private readonly localId: string,
@@ -214,13 +216,18 @@ export class ClaudeNormalizer {
             }
           : undefined
         const isError = msg.is_error || msg.subtype !== 'success'
+        let costUsd: number | undefined
+        if ('total_cost_usd' in msg && typeof msg.total_cost_usd === 'number') {
+          costUsd = Math.max(0, msg.total_cost_usd - this.lastTotalCost)
+          this.lastTotalCost = msg.total_cost_usd
+        }
         return [
           {
             type: 'turn.completed',
             localId,
             turnId,
             usage,
-            costUsd: 'total_cost_usd' in msg ? msg.total_cost_usd : undefined,
+            costUsd,
             durationMs: msg.duration_ms,
             isError,
             errorMessage: isError

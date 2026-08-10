@@ -115,6 +115,45 @@ export interface ChimeraApi {
   >
   onControlRoomEvent(cb: (ev: Record<string, unknown>) => void): () => void
 
+  // templates
+  listTemplates(): Promise<
+    { id: string; name: string; spec: { kind: 'single' | 'group'; members: GroupMemberSpec[] } }[]
+  >
+  saveTemplate(conversationId: string, name: string): Promise<void>
+  deleteTemplate(id: string): Promise<void>
+  createFromTemplate(id: string): Promise<ConversationRecord>
+
+  // schedules
+  listSchedules(): Promise<
+    {
+      id: string
+      conversationId: string
+      prompt: string
+      cadence: { type: 'interval'; minutes: number } | { type: 'daily'; time: string }
+      enabled: boolean
+      nextRunAt: number
+      lastRunAt: number | null
+    }[]
+  >
+  addSchedule(
+    conversationId: string,
+    prompt: string,
+    cadence: { type: 'interval'; minutes: number } | { type: 'daily'; time: string }
+  ): Promise<void>
+  setScheduleEnabled(id: string, enabled: boolean): Promise<void>
+  removeSchedule(id: string): Promise<void>
+
+  // usage / budget
+  usageSummary(): Promise<{
+    todayUsd: number
+    budgetUsd: number | null
+    byConversation: { conversationId: string; title: string; cost: number }[]
+  }>
+  setDailyBudget(budgetUsd: number | null): Promise<void>
+
+  // memory
+  getMemory(conversationId: string): Promise<string>
+
   // misc
   listModels(): Promise<ModelInfo[]>
   authStatus(provider: ProviderId): Promise<AuthStatus>
@@ -144,6 +183,17 @@ export const IPC = {
   busHistory: 'bus:history',
   conferenceRun: 'conference:run',
   controlRoomEvent: 'controlroom:event',
+  templatesList: 'templates:list',
+  templatesSave: 'templates:save',
+  templatesDelete: 'templates:delete',
+  templatesCreate: 'templates:create',
+  schedulesList: 'schedules:list',
+  schedulesAdd: 'schedules:add',
+  schedulesSetEnabled: 'schedules:setEnabled',
+  schedulesRemove: 'schedules:remove',
+  usageSummary: 'usage:summary',
+  usageSetBudget: 'usage:setBudget',
+  memoryGet: 'memory:get',
   sessionInterrupt: 'session:interrupt',
   sessionSetModel: 'session:setModel',
   sessionDispose: 'session:dispose',

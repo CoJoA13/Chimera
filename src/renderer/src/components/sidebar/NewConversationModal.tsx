@@ -1,8 +1,14 @@
-import { useState } from 'react'
-import { X, Plus, Trash2, MessageSquarePlus, Users } from 'lucide-react'
-import { PERSONA_PRESETS } from '../../../../shared/config-types'
+import { useEffect, useState } from 'react'
+import { X, Plus, Trash2, MessageSquarePlus, Users, LayoutTemplate } from 'lucide-react'
+import { PERSONA_PRESETS, type GroupMemberSpec } from '../../../../shared/config-types'
 import { DEFAULT_MODEL, MODEL_CATALOG } from '../../../../shared/models'
 import { useChat } from '../../stores/chat'
+
+interface TemplateRow {
+  id: string
+  name: string
+  spec: { kind: 'single' | 'group'; members: GroupMemberSpec[] }
+}
 
 interface MemberDraft {
   provider: 'claude' | 'codex'
@@ -25,9 +31,27 @@ function defaultMember(existing: MemberDraft[]): MemberDraft {
 export function NewConversationModal({ onClose }: { onClose: () => void }) {
   const newConversation = useChat((s) => s.newConversation)
   const newGroup = useChat((s) => s.newGroup)
+  const adoptConversation = useChat((s) => s.adoptConversation)
   const [name, setName] = useState('')
   const [members, setMembers] = useState<MemberDraft[]>([defaultMember([])])
   const [creating, setCreating] = useState(false)
+  const [templates, setTemplates] = useState<TemplateRow[]>([])
+
+  useEffect(() => {
+    void window.chimera.listTemplates().then(setTemplates)
+  }, [])
+
+  const useTemplate = async (id: string): Promise<void> => {
+    if (creating) return
+    setCreating(true)
+    try {
+      const conv = await window.chimera.createFromTemplate(id)
+      await adoptConversation(conv.id)
+      onClose()
+    } finally {
+      setCreating(false)
+    }
+  }
 
   const update = (i: number, patch: Partial<MemberDraft>): void => {
     setMembers((prev) =>
@@ -98,6 +122,34 @@ export function NewConversationModal({ onClose }: { onClose: () => void }) {
             <X size={16} />
           </button>
         </div>
+
+        {templates.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <LayoutTemplate size={13} className="text-slate-500" />
+            {templates.map((t) => (
+              <span key={t.id} className="flex items-center overflow-hidden rounded-md border border-[#30363d] bg-[#161b22]">
+                <button
+                  onClick={() => void useTemplate(t.id)}
+                  className="px-2 py-1 text-xs text-slate-300 hover:bg-[#21262d] hover:text-cyan-300"
+                  title={`${t.spec.members.length} agent(s): ${t.spec.members.map((m) => m.title).join(', ')}`}
+                >
+                  {t.name}
+                </button>
+                <button
+                  onClick={() =>
+                    void window.chimera
+                      .deleteTemplate(t.id)
+                      .then(() => window.chimera.listTemplates().then(setTemplates))
+                  }
+                  className="border-l border-[#30363d] px-1 py-1 text-slate-600 hover:text-red-400"
+                  title="Delete template"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
 
         {isGroup && (
           <input

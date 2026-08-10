@@ -70,6 +70,21 @@ const api: ChimeraApi = {
   removePlugin: (id: string) => ipcRenderer.invoke(IPC.pluginsRemove, { id }),
   listConnectors: () => ipcRenderer.invoke(IPC.connectorsList),
   addConnector: (id: string) => ipcRenderer.invoke(IPC.connectorsAdd, { id }),
+  listTemplates: () => ipcRenderer.invoke(IPC.templatesList),
+  saveTemplate: (conversationId: string, name: string) =>
+    ipcRenderer.invoke(IPC.templatesSave, { conversationId, name }),
+  deleteTemplate: (id: string) => ipcRenderer.invoke(IPC.templatesDelete, { id }),
+  createFromTemplate: (id: string) => ipcRenderer.invoke(IPC.templatesCreate, { id }),
+  listSchedules: () => ipcRenderer.invoke(IPC.schedulesList),
+  addSchedule: (conversationId: string, prompt: string, cadence: unknown) =>
+    ipcRenderer.invoke(IPC.schedulesAdd, { conversationId, prompt, cadence }),
+  setScheduleEnabled: (id: string, enabled: boolean) =>
+    ipcRenderer.invoke(IPC.schedulesSetEnabled, { id, enabled }),
+  removeSchedule: (id: string) => ipcRenderer.invoke(IPC.schedulesRemove, { id }),
+  usageSummary: () => ipcRenderer.invoke(IPC.usageSummary),
+  setDailyBudget: (budgetUsd: number | null) =>
+    ipcRenderer.invoke(IPC.usageSetBudget, { budgetUsd }),
+  getMemory: (conversationId: string) => ipcRenderer.invoke(IPC.memoryGet, { conversationId }),
   busHistory: () => ipcRenderer.invoke(IPC.busHistory),
   runConference: (
     question: string,

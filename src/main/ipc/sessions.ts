@@ -20,6 +20,9 @@ import { enabledMcpForConversation } from '../store/mcp'
 import { isAlwaysAllowed, addAlwaysAllowRule } from '../store/permissions'
 import { enabledPluginPaths } from '../store/plugins'
 import { recordBusMessage } from '../store/busHistory'
+import { readMemory, MEMORY_INSTRUCTIONS } from '../store/memory'
+import { recordSpend, todaySpend } from '../store/spend'
+import { getSetting } from '../store/settings'
 import {
   recordTranscriptEvent,
   loadTranscript,
@@ -431,6 +434,10 @@ export class SessionManager {
     const personaAppend = conversation.personaName
       ? `\n\nPERSONA: In this app you are "${conversation.personaName}". ${conversation.personaPrompt ?? ''} When communicating over the chimera-bus, act and speak in this role.`
       : ''
+    const memory = readMemory(conversationId)
+    const memoryAppend =
+      `\n\n${MEMORY_INSTRUCTIONS}` +
+      (memory ? `\n\nYOUR CURRENT MEMORY:\n${memory}` : '')
     let groupAppend = ''
     if (groupId) {
       const group = getConversation(groupId)
@@ -444,7 +451,7 @@ export class SessionManager {
       model: conversation.model,
       cwd: conversation.cwd ?? undefined,
       permissionMode: conversation.permissionMode,
-      systemPromptAppend: BUS_INSTRUCTIONS + personaAppend + groupAppend,
+      systemPromptAppend: BUS_INSTRUCTIONS + personaAppend + groupAppend + memoryAppend,
       mcpServers,
       plugins: conversation.provider === 'claude' ? enabledPluginPaths() : undefined,
       onEvent: (ev: SessionEvent) => {
@@ -459,6 +466,7 @@ export class SessionManager {
           }
         }
         if (ev.type === 'turn.completed') {
+          if (ev.costUsd) recordSpend(conversationId, ev.costUsd)
           const title = getConversation(streamId)?.title ?? 'Conversation'
           this.notify(
             streamId,
@@ -520,6 +528,7 @@ export class SessionManager {
    * update (messages since they last responded), and fan out.
    */
   async groupSend(groupId: string, text: string): Promise<void> {
+    this.checkBudget()
     const group = getConversation(groupId)
     if (!group || group.kind !== 'group') throw new Error(`Not a group conversation: ${groupId}`)
     const members = listGroupMembers(groupId)
@@ -601,7 +610,18 @@ export class SessionManager {
     return live
   }
 
+  /** Throws when the configured daily budget has been reached. */
+  private checkBudget(): void {
+    const budget = getSetting<number | null>('dailyBudgetUsd', null)
+    if (budget !== null && todaySpend() >= budget) {
+      throw new Error(
+        `Daily budget reached ($${todaySpend().toFixed(2)} of $${budget.toFixed(2)}). Raise it in Settings → Usage.`
+      )
+    }
+  }
+
   async send(localId: string, text: string, attachments?: UserInput['attachments']): Promise<void> {
+    this.checkBudget()
     const live = this.get(localId)
     touchConversation(live.conversationId)
     const label =
@@ -650,6 +670,10 @@ export class SessionManager {
     } else {
       await this.restart(conversationId)
     }
+  }
+
+  isBusy(conversationId: string): boolean {
+    return this.sessions.get(conversationId)?.status === 'busy'
   }
 
   respondPermission(requestId: string, behavior: 'allow' | 'deny', always?: boolean): void {

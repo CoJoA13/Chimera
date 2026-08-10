@@ -80,6 +80,29 @@ const MIGRATIONS: string[] = [
     member_id TEXT PRIMARY KEY,
     last_seq INTEGER NOT NULL DEFAULT 0
   );
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS templates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    spec_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS schedules (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    cadence_json TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    next_run_at INTEGER NOT NULL,
+    last_run_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS spend (
+    day TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    cost REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, conversation_id)
+  );
   `
 ]
 

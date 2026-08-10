@@ -100,6 +100,8 @@ interface ChatState {
     mode: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
   ): Promise<void>
   setSettingsOpen(open: boolean): void
+  /** Refresh the list and select a conversation created outside the store. */
+  adoptConversation(id: string): Promise<void>
   setActiveView(view: 'chat' | 'control'): void
   handleEvent(ev: SessionEvent): void
 }
@@ -375,6 +377,12 @@ export const useChat = create<ChatState>((set, get) => ({
 
   setSettingsOpen(open) {
     set({ settingsOpen: open })
+  },
+
+  async adoptConversation(id) {
+    const conversations = await window.chimera.listConversations()
+    set({ conversations })
+    await get().selectConversation(id)
   },
 
   setActiveView(view) {

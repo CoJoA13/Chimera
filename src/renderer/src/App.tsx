@@ -11,6 +11,7 @@ import { BusStatusStrip } from './components/chat/BusStatusStrip'
 import { CwdButton } from './components/chat/CwdButton'
 import { PersonaButton } from './components/chat/PersonaButton'
 import { ControlRoom } from './components/control/ControlRoom'
+import { TemplateButton } from './components/chat/TemplateButton'
 import { PermissionDialog } from './components/permissions/PermissionDialog'
 import { SettingsModal } from './components/settings/SettingsModal'
 
@@ -57,6 +58,7 @@ export default function App() {
           {activeView === 'chat' && activeIsGroup && groupMemberNames && (
             <span className="truncate text-xs text-slate-500">{groupMemberNames}</span>
           )}
+          {activeView === 'chat' && <TemplateButton />}
           <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
             {auth?.state === 'authenticated' ? (
               <>

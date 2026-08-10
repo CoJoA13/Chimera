@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpc } from './ipc/register'
 import { SessionManager } from './ipc/sessions'
+import { startScheduler } from './scheduler'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -46,6 +47,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   registerIpc(sessionManager)
   sessionManager.initBusDirectory()
+  startScheduler(sessionManager)
   createWindow()
 
   app.on('activate', () => {

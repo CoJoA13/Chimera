@@ -21,6 +21,23 @@ import {
 import { clearTranscript } from '../store/transcript'
 import { listBusMessages } from '../store/busHistory'
 import {
+  listTemplates,
+  saveTemplateFromConversation,
+  deleteTemplate,
+  getTemplate
+} from '../store/templates'
+import {
+  listSchedules,
+  addSchedule,
+  setScheduleEnabled,
+  removeSchedule,
+  removeSchedulesFor
+} from '../store/schedules'
+import { todaySpend, spendByConversation } from '../store/spend'
+import { getSetting, setSetting } from '../store/settings'
+import { readMemory, deleteMemory } from '../store/memory'
+import { getConversation } from '../store/conversations'
+import {
   listMcpServers,
   addMcpServer,
   removeMcpServer,
@@ -129,11 +146,15 @@ export function registerIpc(manager: SessionManager): void {
       await manager.dispose(member.id)
       manager.unregisterConversation(member.id)
       clearTranscript(member.id)
+      deleteMemory(member.id)
+      removeSchedulesFor(member.id)
       deleteConversation(member.id)
     }
     await manager.dispose(id)
     manager.unregisterConversation(id)
     clearTranscript(id)
+    deleteMemory(id)
+    removeSchedulesFor(id)
     deleteConversation(id)
   })
 
@@ -310,6 +331,92 @@ export function registerIpc(manager: SessionManager): void {
     const connector = loadConnectors().find((c) => c.id === id)
     if (!connector) throw new Error(`Unknown connector: ${id}`)
     addMcpServer(connector.name, connector.transport as McpTransport, 'connector-directory')
+  })
+
+  // templates
+  ipcMain.handle(IPC.templatesList, () => listTemplates())
+  ipcMain.handle(IPC.templatesSave, (_e, payload: unknown) => {
+    const { conversationId, name } = z
+      .object({ conversationId: idSchema, name: z.string().min(1).max(80) })
+      .parse(payload)
+    saveTemplateFromConversation(conversationId, name)
+  })
+  ipcMain.handle(IPC.templatesDelete, (_e, payload: unknown) => {
+    deleteTemplate(z.object({ id: idSchema }).parse(payload).id)
+  })
+  ipcMain.handle(IPC.templatesCreate, (_e, payload: unknown) => {
+    const { id } = z.object({ id: idSchema }).parse(payload)
+    const template = getTemplate(id)
+    if (!template) throw new Error('Template not found')
+    const { kind, members } = template.spec
+    if (kind === 'single' || members.length === 1) {
+      const m = members[0]
+      const conv = createConversation(m.provider, m.model, {
+        personaName: m.personaName ?? null,
+        personaPrompt: m.personaPrompt ?? null
+      })
+      manager.registerConversation(conv.id)
+      return conv
+    }
+    const group = createConversation(members[0].provider, members[0].model, {
+      title: template.name,
+      kind: 'group'
+    })
+    for (const m of members) {
+      const memberConv = createConversation(m.provider, m.model, {
+        title: m.title,
+        groupId: group.id,
+        personaName: m.personaName ?? null,
+        personaPrompt: m.personaPrompt ?? null
+      })
+      manager.registerConversation(memberConv.id)
+    }
+    return group
+  })
+
+  // schedules
+  const cadenceSchema = z.union([
+    z.object({ type: z.literal('interval'), minutes: z.number().min(5).max(10080) }),
+    z.object({ type: z.literal('daily'), time: z.string().regex(/^\d{2}:\d{2}$/) })
+  ])
+  ipcMain.handle(IPC.schedulesList, () => listSchedules())
+  ipcMain.handle(IPC.schedulesAdd, (_e, payload: unknown) => {
+    const { conversationId, prompt, cadence } = z
+      .object({ conversationId: idSchema, prompt: z.string().min(1), cadence: cadenceSchema })
+      .parse(payload)
+    addSchedule(conversationId, prompt, cadence)
+  })
+  ipcMain.handle(IPC.schedulesSetEnabled, (_e, payload: unknown) => {
+    const { id, enabled } = z.object({ id: idSchema, enabled: z.boolean() }).parse(payload)
+    setScheduleEnabled(id, enabled)
+  })
+  ipcMain.handle(IPC.schedulesRemove, (_e, payload: unknown) => {
+    removeSchedule(z.object({ id: idSchema }).parse(payload).id)
+  })
+
+  // usage / budget
+  ipcMain.handle(IPC.usageSummary, () => {
+    const byConversation = spendByConversation().map((row) => ({
+      ...row,
+      title: getConversation(row.conversationId)?.title ?? 'deleted conversation'
+    }))
+    return {
+      todayUsd: todaySpend(),
+      budgetUsd: getSetting<number | null>('dailyBudgetUsd', null),
+      byConversation
+    }
+  })
+  ipcMain.handle(IPC.usageSetBudget, (_e, payload: unknown) => {
+    const { budgetUsd } = z
+      .object({ budgetUsd: z.number().min(0.5).max(1000).nullable() })
+      .parse(payload)
+    setSetting('dailyBudgetUsd', budgetUsd)
+  })
+
+  // memory
+  ipcMain.handle(IPC.memoryGet, (_e, payload: unknown) => {
+    const { conversationId } = z.object({ conversationId: idSchema }).parse(payload)
+    return readMemory(conversationId)
   })
 
   // control room

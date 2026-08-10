@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { BusCore, DEFAULT_AWAIT_SECONDS, MAX_AWAIT_SECONDS } from './BusCore'
+import { readMemory, saveMemory } from '../store/memory'
 
 export interface BusToolResult {
   [key: string]: unknown
@@ -163,6 +164,35 @@ export function busToolDefs(core: BusCore, callerLocalId: string): BusToolDef[] 
         try {
           core.reply(callerLocalId, args.message_id, args.text)
           return ok({ status: 'replied' })
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err))
+        }
+      }
+    },
+    {
+      name: 'read_memory',
+      description:
+        'Read your persistent memory file — durable notes that survive across sessions.',
+      schema: {},
+      handler: async (): Promise<BusToolResult> => {
+        debug(callerLocalId, 'read_memory', {})
+        const content = readMemory(callerLocalId)
+        return ok({ memory: content || '(empty — you have not saved anything yet)' })
+      }
+    },
+    {
+      name: 'save_memory',
+      description:
+        'REPLACE your persistent memory file (max 8KB). Read it first and write the merged result — this overwrites, not appends.',
+      schema: {
+        content: z.string().describe('The complete new memory content (markdown)')
+      },
+      handler: async (raw): Promise<BusToolResult> => {
+        const args = raw as unknown as { content: string }
+        debug(callerLocalId, 'save_memory', { length: args.content.length })
+        try {
+          saveMemory(callerLocalId, args.content)
+          return ok({ status: 'saved', length: args.content.length })
         } catch (err) {
           return fail(err instanceof Error ? err.message : String(err))
         }
