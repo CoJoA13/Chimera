@@ -1,3 +1,4 @@
+import { BrowserWindow, Notification } from 'electron'
 import type { WebContents } from 'electron'
 import { getSessionMessages } from '@anthropic-ai/claude-agent-sdk'
 import type { SessionEvent } from '../../shared/events'
@@ -16,6 +17,8 @@ import { enabledMcpForConversation } from '../store/mcp'
 import { isAlwaysAllowed, addAlwaysAllowRule } from '../store/permissions'
 import { enabledPluginPaths } from '../store/plugins'
 import { recordBusMessage } from '../store/busHistory'
+import { recordTranscriptEvent, loadTranscript } from '../store/transcript'
+import type { UserInput } from '../providers/types'
 import { BusCore, BUS_INSTRUCTIONS, formatBusPrompt, type BusMessage } from '../bus/BusCore'
 import { createClaudeBusServer } from '../bus/claudeServer'
 import { BusHttpServer } from '../bus/httpServer'
@@ -29,7 +32,11 @@ class EventSender {
   private buffers = new Map<string, SessionEvent & { type: 'text.delta' | 'thinking.delta' }>()
   private timer: NodeJS.Timeout | null = null
 
-  constructor(private readonly getTarget: () => WebContents | null) {}
+  constructor(
+    private readonly getTarget: () => WebContents | null,
+    /** Persist renderable events for history replay. */
+    private readonly record?: (ev: SessionEvent) => void
+  ) {}
 
   push(ev: SessionEvent): void {
     if (ev.type === 'text.delta' || ev.type === 'thinking.delta') {
@@ -59,6 +66,7 @@ class EventSender {
   }
 
   private sendRaw(ev: SessionEvent): void {
+    this.record?.(ev)
     const target = this.getTarget()
     if (target && !target.isDestroyed()) target.send('session:event', ev)
   }
@@ -149,6 +157,24 @@ export class SessionManager {
     this.bus.unregister(conversationId)
   }
 
+  /** Desktop notification for events that land while the window is unfocused. */
+  private notify(conversationId: string, title: string, body: string): void {
+    const target = this.getTarget()
+    if (!target || target.isDestroyed() || !Notification.isSupported()) return
+    const win = BrowserWindow.fromWebContents(target)
+    if (!win || win.isFocused()) return
+    const notification = new Notification({
+      title,
+      body: body.length > 120 ? `${body.slice(0, 120)}…` : body
+    })
+    notification.on('click', () => {
+      win.show()
+      win.focus()
+      target.send('ui:focusConversation', conversationId)
+    })
+    notification.show()
+  }
+
   /** Inject queued/incoming bus messages as a synthetic user turn. */
   private injectBusMessages(conversationId: string, messages: BusMessage[]): void {
     const live = this.sessions.get(conversationId)
@@ -168,6 +194,12 @@ export class SessionManager {
     const text = messages
       .map((msg) => formatBusPrompt(msg, getConversation(msg.from)?.title ?? 'peer session'))
       .join('\n\n')
+    const fromTitle = getConversation(messages[0].from)?.title ?? 'a peer session'
+    this.notify(
+      conversationId,
+      `Agent message for "${getConversation(conversationId)?.title ?? 'conversation'}"`,
+      `From ${fromTitle}: ${messages[0].text}`
+    )
     void live.session.send({ text })
   }
 
@@ -186,7 +218,9 @@ export class SessionManager {
     // Stable identity: the session's localId IS the conversation id, so bus
     // registrations and renderer routing survive restarts.
     const localId = conversationId
-    const sender = new EventSender(this.getTarget)
+    const sender = new EventSender(this.getTarget, (ev) =>
+      recordTranscriptEvent(conversationId, ev)
+    )
 
     const mcpServers: McpServerRuntimeConfig[] = enabledMcpForConversation(conversationId).map(
       (record) => ({ name: record.name, config: record.transport })
@@ -223,6 +257,21 @@ export class SessionManager {
           if (ev.type === 'turn.completed' || (ev.type === 'session.error' && ev.fatal)) {
             live.status = 'idle'
           }
+        }
+        if (ev.type === 'turn.completed') {
+          const title = getConversation(conversationId)?.title ?? 'Conversation'
+          this.notify(
+            conversationId,
+            ev.isError ? `${title} — turn failed` : `${title} — finished`,
+            ev.errorMessage ?? 'The agent finished responding.'
+          )
+        }
+        if (ev.type === 'permission.request') {
+          this.notify(
+            conversationId,
+            'Permission needed',
+            `${getConversation(conversationId)?.title ?? 'A conversation'} wants to use ${ev.toolName}`
+          )
         }
         sender.push(ev)
         // A completed turn may unblock queued bus messages.
@@ -265,10 +314,12 @@ export class SessionManager {
     return { localId, resumed: conversation.providerSessionId !== null }
   }
 
-  /** Replay stored history for a conversation as normalized events. */
+  /** Replay stored history: transcript cache first, Claude SDK store as legacy fallback. */
   async history(conversationId: string): Promise<SessionEvent[]> {
+    const cached = loadTranscript(conversationId)
+    if (cached.length > 0) return cached
     const conversation = getConversation(conversationId)
-    if (!conversation?.providerSessionId) return []
+    if (!conversation?.providerSessionId || conversation.provider !== 'claude') return []
     try {
       const messages = await getSessionMessages(conversation.providerSessionId)
       return normalizeStoredHistory(conversationId, messages)
@@ -289,10 +340,20 @@ export class SessionManager {
     return live
   }
 
-  async send(localId: string, text: string): Promise<void> {
+  async send(localId: string, text: string, attachments?: UserInput['attachments']): Promise<void> {
     const live = this.get(localId)
     touchConversation(live.conversationId)
-    await live.session.send({ text })
+    const label =
+      attachments && attachments.length > 0
+        ? `${text}\n[attached: ${attachments.map((a) => a.path.split('/').pop()).join(', ')}]`
+        : text
+    recordTranscriptEvent(live.conversationId, {
+      type: 'user.message',
+      localId,
+      turnId: 'live',
+      text: label
+    })
+    await live.session.send({ text, attachments })
   }
 
   async interrupt(localId: string): Promise<void> {
@@ -318,7 +379,13 @@ export class SessionManager {
     if (!live) return
     const conversation = getConversation(conversationId)
     if (conversation?.provider === 'claude') {
-      await live.session.setPermissionMode(mode)
+      try {
+        await live.session.setPermissionMode(mode)
+      } catch {
+        // e.g. switching to bypassPermissions on a session launched without
+        // the capability — apply it via restart-with-resume instead.
+        await this.restart(conversationId)
+      }
     } else {
       await this.restart(conversationId)
     }

@@ -20,8 +20,20 @@ const api: ChimeraApi = {
     ipcRenderer.invoke(IPC.sessionRestart, { conversationId }),
   sessionHistory: (conversationId: string) =>
     ipcRenderer.invoke(IPC.sessionHistory, { conversationId }),
-  sendMessage: (localId: string, text: string) =>
-    ipcRenderer.invoke(IPC.sessionSend, { localId, text }),
+  sendMessage: (localId: string, text: string, attachments?: { path: string; mimeType: string }[]) =>
+    ipcRenderer.invoke(IPC.sessionSend, { localId, text, attachments }),
+  pickFiles: () => ipcRenderer.invoke(IPC.dialogPickFiles),
+  pickFolder: () => ipcRenderer.invoke(IPC.dialogPickFolder),
+  setConversationCwd: (conversationId: string, cwd: string) =>
+    ipcRenderer.invoke(IPC.conversationSetCwd, { conversationId, cwd }),
+  onFocusConversation: (cb: (conversationId: string) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, conversationId: string): void =>
+      cb(conversationId)
+    ipcRenderer.on(IPC.uiFocusConversation, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.uiFocusConversation, listener)
+    }
+  },
   interrupt: (localId: string) => ipcRenderer.invoke(IPC.sessionInterrupt, { localId }),
   setModel: (localId: string, model: string) =>
     ipcRenderer.invoke(IPC.sessionSetModel, { localId, model }),

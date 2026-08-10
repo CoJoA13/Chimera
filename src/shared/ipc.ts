@@ -51,7 +51,15 @@ export interface ChimeraApi {
   ): Promise<void>
   restartSession(conversationId: string): Promise<StartSessionResult>
   sessionHistory(conversationId: string): Promise<SessionEvent[]>
-  sendMessage(localId: string, text: string): Promise<void>
+  sendMessage(
+    localId: string,
+    text: string,
+    attachments?: { path: string; mimeType: string }[]
+  ): Promise<void>
+  pickFiles(): Promise<{ path: string; mimeType: string }[]>
+  pickFolder(): Promise<string | null>
+  setConversationCwd(conversationId: string, cwd: string): Promise<void>
+  onFocusConversation(cb: (conversationId: string) => void): () => void
   interrupt(localId: string): Promise<void>
   setModel(localId: string, model: string): Promise<void>
   disposeSession(localId: string): Promise<void>
@@ -94,6 +102,10 @@ export const IPC = {
   sessionRestart: 'session:restart',
   sessionHistory: 'session:history',
   sessionSend: 'session:send',
+  dialogPickFiles: 'dialog:pickFiles',
+  dialogPickFolder: 'dialog:pickFolder',
+  conversationSetCwd: 'conversation:setCwd',
+  uiFocusConversation: 'ui:focusConversation',
   sessionInterrupt: 'session:interrupt',
   sessionSetModel: 'session:setModel',
   sessionDispose: 'session:dispose',

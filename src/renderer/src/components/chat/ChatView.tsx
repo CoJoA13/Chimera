@@ -13,6 +13,18 @@ function renderBlock(block: Block) {
         <div className="my-3 flex justify-end">
           <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-sky-900/50 px-4 py-2.5 text-[15px] whitespace-pre-wrap">
             {block.text}
+            {block.attachments && block.attachments.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {block.attachments.map((name, i) => (
+                  <span
+                    key={`${name}-${i}`}
+                    className="rounded bg-sky-950/60 px-1.5 py-0.5 text-xs text-sky-300"
+                  >
+                    📎 {name}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )

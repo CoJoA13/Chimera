@@ -8,6 +8,7 @@ import { ModelPicker } from './components/chat/ModelPicker'
 import { McpPopover } from './components/chat/McpPopover'
 import { PermissionModeBadge } from './components/chat/PermissionModeBadge'
 import { BusStatusStrip } from './components/chat/BusStatusStrip'
+import { CwdButton } from './components/chat/CwdButton'
 import { PermissionDialog } from './components/permissions/PermissionDialog'
 import { SettingsModal } from './components/settings/SettingsModal'
 
@@ -34,6 +35,7 @@ export default function App() {
           </span>
           <ModelPicker />
           <McpPopover />
+          <CwdButton />
           <PermissionModeBadge />
           <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
             {auth?.state === 'authenticated' ? (

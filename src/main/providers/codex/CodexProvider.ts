@@ -96,11 +96,24 @@ class CodexSession implements ProviderSession {
       this.preambleSent = true
     }
 
+    const images: string[] = []
+    for (const att of input.attachments ?? []) {
+      if (att.mimeType.startsWith('image/')) images.push(att.path)
+      else text += `\n\nAttached file: ${att.path}`
+    }
+    const codexInput =
+      images.length > 0
+        ? [
+            { type: 'text' as const, text },
+            ...images.map((path) => ({ type: 'local_image' as const, path }))
+          ]
+        : text
+
     this.abort = new AbortController()
-    void this.pump(text)
+    void this.pump(codexInput)
   }
 
-  private async pump(text: string): Promise<void> {
+  private async pump(text: string | { type: 'text' | 'local_image'; [k: string]: unknown }[]): Promise<void> {
     const localId = this.localId
     const turnId = this.currentTurnId
     /** item id -> last emitted text length (for delta computation) */
@@ -234,7 +247,9 @@ class CodexSession implements ProviderSession {
     }
 
     try {
-      const { events } = await this.thread.runStreamed(text, { signal: this.abort?.signal })
+      const { events } = await this.thread.runStreamed(text as never, {
+        signal: this.abort?.signal
+      })
       for await (const ev of events as AsyncGenerator<ThreadEvent>) {
         switch (ev.type) {
           case 'thread.started':

@@ -5,7 +5,7 @@ import type { ModelInfo } from '../../../shared/models'
 import type { ConversationRecord } from '../../../shared/config-types'
 
 export type Block =
-  | { kind: 'user'; id: string; text: string }
+  | { kind: 'user'; id: string; text: string; attachments?: string[] }
   | { kind: 'assistant'; id: string; text: string; streaming: boolean }
   | { kind: 'thinking'; id: string; text: string; streaming: boolean }
   | {
@@ -70,7 +70,8 @@ interface ChatState {
   selectConversation(id: string): Promise<void>
   deleteConversation(id: string): Promise<void>
   restartActiveSession(): Promise<void>
-  send(text: string): Promise<void>
+  send(text: string, attachments?: { path: string; mimeType: string }[]): Promise<void>
+  setCwd(): Promise<void>
   interrupt(): Promise<void>
   changeModel(model: string): Promise<void>
   respondPermission(requestId: string, behavior: 'allow' | 'deny', always?: boolean): Promise<void>
@@ -112,6 +113,9 @@ export const useChat = create<ChatState>((set, get) => ({
     if (initialized) return
     initialized = true
     window.chimera.onSessionEvent((ev) => get().handleEvent(ev))
+    window.chimera.onFocusConversation((conversationId) => {
+      void get().selectConversation(conversationId)
+    })
     const [models, auth, codexAuth, conversations] = await Promise.all([
       window.chimera.listModels(),
       window.chimera.authStatus('claude'),
@@ -206,7 +210,7 @@ export const useChat = create<ChatState>((set, get) => ({
     })
   },
 
-  async send(text) {
+  async send(text, attachments) {
     const { activeConvId, sessionByConv, statusByConv, conversations } = get()
     if (!activeConvId) return
     const localId = sessionByConv[activeConvId]
@@ -217,7 +221,12 @@ export const useChat = create<ChatState>((set, get) => ({
         ...s.blocksByConv,
         [activeConvId]: [
           ...(s.blocksByConv[activeConvId] ?? []),
-          { kind: 'user', id: crypto.randomUUID(), text }
+          {
+            kind: 'user',
+            id: crypto.randomUUID(),
+            text,
+            attachments: attachments?.map((a) => a.path.split('/').pop() ?? a.path)
+          }
         ]
       }
     }))
@@ -232,7 +241,18 @@ export const useChat = create<ChatState>((set, get) => ({
       }))
     }
 
-    await window.chimera.sendMessage(localId, text)
+    await window.chimera.sendMessage(localId, text, attachments)
+  },
+
+  async setCwd() {
+    const { activeConvId } = get()
+    if (!activeConvId) return
+    const cwd = await window.chimera.pickFolder()
+    if (!cwd) return
+    await window.chimera.setConversationCwd(activeConvId, cwd)
+    set((s) => ({
+      conversations: s.conversations.map((c) => (c.id === activeConvId ? { ...c, cwd } : c))
+    }))
   },
 
   async interrupt() {

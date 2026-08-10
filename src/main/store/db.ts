@@ -60,6 +60,14 @@ const MIGRATIONS: string[] = [
     text TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS transcript_cache (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    event_json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_transcript_conv ON transcript_cache (conversation_id, seq);
   `
 ]
 

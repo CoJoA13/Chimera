@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createRequire } from 'node:module'
 import { launchInTerminal } from '../../terminal'
@@ -82,6 +82,9 @@ class ClaudeSession implements ProviderSession {
       cwd: opts.cwd ?? homedir(),
       includePartialMessages: true,
       permissionMode: opts.permissionMode ?? 'default',
+      // Permits switching the live session into bypassPermissions later; the
+      // active permission mode still governs behavior.
+      allowDangerouslySkipPermissions: true,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: opts.systemPromptAppend },
       mcpServers,
       plugins: opts.plugins,
@@ -138,9 +141,39 @@ class ClaudeSession implements ProviderSession {
     this.currentTurnId = randomUUID()
     this.status = 'busy'
     this.opts.onEvent({ type: 'turn.started', localId: this.localId, turnId: this.currentTurnId })
+
+    let text = input.text
+    const imageBlocks: Record<string, unknown>[] = []
+    for (const att of input.attachments ?? []) {
+      const isImage = att.mimeType.startsWith('image/')
+      const isSmallEnough = ((): boolean => {
+        try {
+          return statSync(att.path).size < 5 * 1024 * 1024
+        } catch {
+          return false
+        }
+      })()
+      if (isImage && isSmallEnough) {
+        imageBlocks.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: att.mimeType,
+            data: readFileSync(att.path).toString('base64')
+          }
+        })
+      } else {
+        // Non-image (or oversized) files: reference by path; the agent reads
+        // them with its own tools.
+        text += `\n\nAttached file: ${att.path}`
+      }
+    }
+
+    const content =
+      imageBlocks.length > 0 ? ([{ type: 'text', text }, ...imageBlocks] as never) : text
     this.input.push({
       type: 'user',
-      message: { role: 'user', content: input.text },
+      message: { role: 'user', content },
       parent_tool_use_id: null
     })
   }

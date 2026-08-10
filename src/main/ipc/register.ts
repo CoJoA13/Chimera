@@ -13,8 +13,10 @@ import {
   listConversations,
   createConversation,
   renameConversation,
-  deleteConversation
+  deleteConversation,
+  setConversationCwd
 } from '../store/conversations'
+import { clearTranscript } from '../store/transcript'
 import {
   listMcpServers,
   addMcpServer,
@@ -67,6 +69,7 @@ export function registerIpc(manager: SessionManager): void {
     const { id } = z.object({ id: idSchema }).parse(payload)
     await manager.dispose(id)
     manager.unregisterConversation(id)
+    clearTranscript(id)
     deleteConversation(id)
   })
 
@@ -93,10 +96,50 @@ export function registerIpc(manager: SessionManager): void {
     return manager.history(conversationId)
   })
   ipcMain.handle(IPC.sessionSend, (_e, payload: unknown) => {
-    const { localId, text } = z
-      .object({ localId: idSchema, text: z.string().min(1) })
+    const { localId, text, attachments } = z
+      .object({
+        localId: idSchema,
+        text: z.string().min(1),
+        attachments: z
+          .array(z.object({ path: z.string().min(1), mimeType: z.string() }))
+          .optional()
+      })
       .parse(payload)
-    return manager.send(localId, text)
+    return manager.send(localId, text, attachments)
+  })
+
+  const MIME_BY_EXT: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml'
+  }
+  ipcMain.handle(IPC.dialogPickFiles, async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Attach files',
+      properties: ['openFile', 'multiSelections']
+    })
+    if (result.canceled) return []
+    return result.filePaths.map((path) => {
+      const ext = path.split('.').pop()?.toLowerCase() ?? ''
+      return { path, mimeType: MIME_BY_EXT[ext] ?? 'application/octet-stream' }
+    })
+  })
+  ipcMain.handle(IPC.dialogPickFolder, async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Choose working directory',
+      properties: ['openDirectory']
+    })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+  ipcMain.handle(IPC.conversationSetCwd, async (_e, payload: unknown) => {
+    const { conversationId, cwd } = z
+      .object({ conversationId: idSchema, cwd: z.string().min(1) })
+      .parse(payload)
+    setConversationCwd(conversationId, cwd)
+    await manager.restart(conversationId)
   })
   ipcMain.handle(IPC.sessionInterrupt, (_e, payload: unknown) => {
     return manager.interrupt(z.object({ localId: idSchema }).parse(payload).localId)

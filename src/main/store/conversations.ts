@@ -102,6 +102,10 @@ export function setConversationModel(id: string, model: string): void {
   getDb().prepare('UPDATE conversations SET model = ? WHERE id = ?').run(model, id)
 }
 
+export function setConversationCwd(id: string, cwd: string): void {
+  getDb().prepare('UPDATE conversations SET cwd = ? WHERE id = ?').run(cwd, id)
+}
+
 export function setConversationPermissionMode(
   id: string,
   mode: ConversationRecord['permissionMode']
