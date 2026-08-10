@@ -49,7 +49,8 @@ export function busToolDefs(core: BusCore, callerLocalId: string): BusToolDef[] 
             session_id: s.localId,
             title: s.title,
             provider: s.provider,
-            status: s.status
+            status: s.status,
+            persona: s.persona
           }))
         })
       }
@@ -80,6 +81,54 @@ export function busToolDefs(core: BusCore, callerLocalId: string): BusToolDef[] 
         } catch (err) {
           return fail(err instanceof Error ? err.message : String(err))
         }
+      }
+    },
+    {
+      name: 'broadcast',
+      description:
+        'Send the same message to EVERY other live session at once. Returns a message_id per recipient; use await_replies to collect their answers.',
+      schema: {
+        text: z.string().describe('The message to send to all peers'),
+        expects_reply: z
+          .boolean()
+          .optional()
+          .describe('Whether you intend to collect replies (default false)')
+      },
+      handler: async (raw): Promise<BusToolResult> => {
+        const args = raw as unknown as { text: string; expects_reply?: boolean }
+        debug(callerLocalId, 'broadcast', args)
+        const results = core.broadcast(callerLocalId, args.text, args.expects_reply ?? false)
+        if (results.length === 0) {
+          return ok({ recipients: [], note: 'No other sessions are live.' })
+        }
+        return ok({
+          recipients: results.map((r) => ({
+            session_id: r.sessionId,
+            message_id: r.messageId,
+            error: r.error
+          }))
+        })
+      }
+    },
+    {
+      name: 'await_replies',
+      description: `Collect replies to several messages you sent (e.g. after broadcast). Blocks until all reply or the shared timeout fires (default ${DEFAULT_AWAIT_SECONDS}s, max ${MAX_AWAIT_SECONDS}s); timed-out entries return status "timeout" while received replies are kept.`,
+      schema: {
+        message_ids: z.array(z.string()).describe('message_ids returned by send_to_session/broadcast'),
+        timeout_seconds: z.number().optional()
+      },
+      handler: async (raw): Promise<BusToolResult> => {
+        const args = raw as unknown as { message_ids: string[]; timeout_seconds?: number }
+        debug(callerLocalId, 'await_replies:begin', args)
+        const results = await core.awaitReplies(
+          callerLocalId,
+          args.message_ids,
+          args.timeout_seconds ?? DEFAULT_AWAIT_SECONDS
+        )
+        debug(callerLocalId, 'await_replies:end', { count: results.length })
+        return ok({
+          replies: results.map((r) => ({ message_id: r.messageId, ...r.result }))
+        })
       }
     },
     {

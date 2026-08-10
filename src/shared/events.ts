@@ -64,6 +64,12 @@ export type SessionEvent =
       inReplyTo?: string
       text: string
     }
-  /** Live bus activity: the session is blocked awaiting a peer's reply (or no longer is). */
-  | { type: 'bus.status'; localId: string; status: 'awaiting' | 'idle'; peerLocalId?: string }
+  /** Live bus activity: the session is blocked awaiting peers' replies (or no longer is). */
+  | {
+      type: 'bus.status'
+      localId: string
+      status: 'awaiting' | 'idle'
+      peerLocalId?: string
+      peerCount?: number
+    }
   | { type: 'session.error'; localId: string; message: string; fatal: boolean }

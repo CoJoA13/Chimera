@@ -68,6 +68,10 @@ const MIGRATIONS: string[] = [
     event_json TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_transcript_conv ON transcript_cache (conversation_id, seq);
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN persona_name TEXT;
+  ALTER TABLE conversations ADD COLUMN persona_prompt TEXT;
   `
 ]
 

@@ -14,7 +14,8 @@ import {
   createConversation,
   renameConversation,
   deleteConversation,
-  setConversationCwd
+  setConversationCwd,
+  setConversationPersona
 } from '../store/conversations'
 import { clearTranscript } from '../store/transcript'
 import {
@@ -139,6 +140,18 @@ export function registerIpc(manager: SessionManager): void {
       .object({ conversationId: idSchema, cwd: z.string().min(1) })
       .parse(payload)
     setConversationCwd(conversationId, cwd)
+    await manager.restart(conversationId)
+  })
+  ipcMain.handle(IPC.conversationSetPersona, async (_e, payload: unknown) => {
+    const { conversationId, name, prompt } = z
+      .object({
+        conversationId: idSchema,
+        name: z.string().min(1).max(60).nullable(),
+        prompt: z.string().max(2000).nullable()
+      })
+      .parse(payload)
+    setConversationPersona(conversationId, name, prompt)
+    // Persona is baked into the system prompt at session start.
     await manager.restart(conversationId)
   })
   ipcMain.handle(IPC.sessionInterrupt, (_e, payload: unknown) => {

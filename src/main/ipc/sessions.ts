@@ -111,12 +111,13 @@ export class SessionManager {
       }
     }
     // Live await-reply indicator for the UI.
-    this.bus.onAwaitChange = (localId, peerLocalId) => {
+    this.bus.onAwaitChange = (localId, peerLocalIds) => {
       this.sessions.get(localId)?.sender.push({
         type: 'bus.status',
         localId,
-        status: peerLocalId ? 'awaiting' : 'idle',
-        peerLocalId: peerLocalId ?? undefined
+        status: peerLocalIds.length > 0 ? 'awaiting' : 'idle',
+        peerLocalId: peerLocalIds[0],
+        peerCount: peerLocalIds.length
       })
     }
   }
@@ -131,13 +132,19 @@ export class SessionManager {
     if (!conversation) return
     this.bus.register(
       conversationId,
-      () => ({
-        localId: conversationId,
-        conversationId,
-        title: getConversation(conversationId)?.title ?? 'Untitled',
-        provider: conversation.provider,
-        status: this.sessions.get(conversationId)?.status ?? 'idle'
-      }),
+      () => {
+        const current = getConversation(conversationId)
+        return {
+          localId: conversationId,
+          conversationId,
+          title: current?.title ?? 'Untitled',
+          provider: conversation.provider,
+          status: this.sessions.get(conversationId)?.status ?? 'idle',
+          persona: current?.personaName
+            ? `${current.personaName}${current.personaPrompt ? ` — ${current.personaPrompt.slice(0, 120)}` : ''}`
+            : undefined
+        }
+      },
       (msg) => {
         void (async () => {
           await this.startForConversation(conversationId)
@@ -191,9 +198,12 @@ export class SessionManager {
         text: msg.text
       })
     }
-    const text = messages
-      .map((msg) => formatBusPrompt(msg, getConversation(msg.from)?.title ?? 'peer session'))
-      .join('\n\n')
+    const fromLabel = (from: string): string => {
+      const conv = getConversation(from)
+      if (!conv) return 'peer session'
+      return conv.personaName ? `${conv.title} (${conv.personaName})` : conv.title
+    }
+    const text = messages.map((msg) => formatBusPrompt(msg, fromLabel(msg.from))).join('\n\n')
     const fromTitle = getConversation(messages[0].from)?.title ?? 'a peer session'
     this.notify(
       conversationId,
@@ -240,11 +250,14 @@ export class SessionManager {
       })
     }
 
+    const personaAppend = conversation.personaName
+      ? `\n\nPERSONA: In this app you are "${conversation.personaName}". ${conversation.personaPrompt ?? ''} When communicating over the chimera-bus, act and speak in this role.`
+      : ''
     const opts = {
       model: conversation.model,
       cwd: conversation.cwd ?? undefined,
       permissionMode: conversation.permissionMode,
-      systemPromptAppend: BUS_INSTRUCTIONS,
+      systemPromptAppend: BUS_INSTRUCTIONS + personaAppend,
       mcpServers,
       plugins: conversation.provider === 'claude' ? enabledPluginPaths() : undefined,
       onEvent: (ev: SessionEvent) => {

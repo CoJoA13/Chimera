@@ -59,6 +59,7 @@ export interface ChimeraApi {
   pickFiles(): Promise<{ path: string; mimeType: string }[]>
   pickFolder(): Promise<string | null>
   setConversationCwd(conversationId: string, cwd: string): Promise<void>
+  setPersona(conversationId: string, name: string | null, prompt: string | null): Promise<void>
   onFocusConversation(cb: (conversationId: string) => void): () => void
   interrupt(localId: string): Promise<void>
   setModel(localId: string, model: string): Promise<void>
@@ -105,6 +106,7 @@ export const IPC = {
   dialogPickFiles: 'dialog:pickFiles',
   dialogPickFolder: 'dialog:pickFolder',
   conversationSetCwd: 'conversation:setCwd',
+  conversationSetPersona: 'conversation:setPersona',
   uiFocusConversation: 'ui:focusConversation',
   sessionInterrupt: 'session:interrupt',
   sessionSetModel: 'session:setModel',

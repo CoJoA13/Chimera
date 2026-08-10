@@ -26,6 +26,8 @@ const api: ChimeraApi = {
   pickFolder: () => ipcRenderer.invoke(IPC.dialogPickFolder),
   setConversationCwd: (conversationId: string, cwd: string) =>
     ipcRenderer.invoke(IPC.conversationSetCwd, { conversationId, cwd }),
+  setPersona: (conversationId: string, name: string | null, prompt: string | null) =>
+    ipcRenderer.invoke(IPC.conversationSetPersona, { conversationId, name, prompt }),
   onFocusConversation: (cb: (conversationId: string) => void) => {
     const listener = (_e: Electron.IpcRendererEvent, conversationId: string): void =>
       cb(conversationId)

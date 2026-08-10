@@ -11,6 +11,8 @@ interface Row {
   provider_session_id: string | null
   cwd: string | null
   permission_mode: string
+  persona_name: string | null
+  persona_prompt: string | null
   created_at: number
   updated_at: number
 }
@@ -24,6 +26,8 @@ function toRecord(row: Row): ConversationRecord {
     providerSessionId: row.provider_session_id,
     cwd: row.cwd,
     permissionMode: row.permission_mode as ConversationRecord['permissionMode'],
+    personaName: row.persona_name,
+    personaPrompt: row.persona_prompt,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }
@@ -53,6 +57,8 @@ export function createConversation(provider: ProviderId, model: string): Convers
     providerSessionId: null,
     cwd: null,
     permissionMode: 'default',
+    personaName: null,
+    personaPrompt: null,
     createdAt: now,
     updatedAt: now
   }
@@ -100,6 +106,16 @@ export function setProviderSessionId(id: string, providerSessionId: string): voi
 
 export function setConversationModel(id: string, model: string): void {
   getDb().prepare('UPDATE conversations SET model = ? WHERE id = ?').run(model, id)
+}
+
+export function setConversationPersona(
+  id: string,
+  personaName: string | null,
+  personaPrompt: string | null
+): void {
+  getDb()
+    .prepare('UPDATE conversations SET persona_name = ?, persona_prompt = ? WHERE id = ?')
+    .run(personaName, personaPrompt, id)
 }
 
 export function setConversationCwd(id: string, cwd: string): void {

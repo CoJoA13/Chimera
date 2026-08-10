@@ -53,8 +53,8 @@ interface ChatState {
   statusByConv: Record<string, 'idle' | 'streaming'>
   blocksByConv: Record<string, Block[]>
   hydrated: Record<string, boolean>
-  /** conversationId -> peer localId this conversation is awaiting a bus reply from */
-  busAwaitByConv: Record<string, string | null>
+  /** conversationId -> live await state (peer + how many sessions are awaited) */
+  busAwaitByConv: Record<string, { peer: string | null; count: number } | null>
   /** conversations with unseen inbound bus messages */
   unreadBusByConv: Record<string, boolean>
   permissions: PendingPermission[]
@@ -72,6 +72,7 @@ interface ChatState {
   restartActiveSession(): Promise<void>
   send(text: string, attachments?: { path: string; mimeType: string }[]): Promise<void>
   setCwd(): Promise<void>
+  setPersona(name: string | null, prompt: string | null): Promise<void>
   interrupt(): Promise<void>
   changeModel(model: string): Promise<void>
   respondPermission(requestId: string, behavior: 'allow' | 'deny', always?: boolean): Promise<void>
@@ -277,6 +278,17 @@ export const useChat = create<ChatState>((set, get) => ({
     await window.chimera.respondPermission({ requestId, behavior, always })
   },
 
+  async setPersona(name, prompt) {
+    const { activeConvId } = get()
+    if (!activeConvId) return
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === activeConvId ? { ...c, personaName: name, personaPrompt: prompt } : c
+      )
+    }))
+    await window.chimera.setPersona(activeConvId, name, prompt)
+  },
+
   async setPermissionMode(mode) {
     const { activeConvId, sessionByConv } = get()
     if (!activeConvId) return
@@ -423,7 +435,10 @@ export const useChat = create<ChatState>((set, get) => ({
         set((st) => ({
           busAwaitByConv: {
             ...st.busAwaitByConv,
-            [convId]: ev.status === 'awaiting' ? (ev.peerLocalId ?? null) : null
+            [convId]:
+              ev.status === 'awaiting'
+                ? { peer: ev.peerLocalId ?? null, count: ev.peerCount ?? 1 }
+                : null
           }
         }))
         break

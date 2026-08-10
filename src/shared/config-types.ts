@@ -21,9 +21,39 @@ export interface ConversationRecord {
   providerSessionId: string | null
   cwd: string | null
   permissionMode: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+  personaName: string | null
+  personaPrompt: string | null
   createdAt: number
   updatedAt: number
 }
+
+export interface PersonaPreset {
+  name: string
+  prompt: string
+}
+
+export const PERSONA_PRESETS: PersonaPreset[] = [
+  {
+    name: 'Reviewer',
+    prompt:
+      'You are a meticulous code reviewer. Focus on correctness, security, and maintainability. Be direct about problems, cite file/line evidence, and always distinguish must-fix issues from suggestions.'
+  },
+  {
+    name: 'Architect',
+    prompt:
+      'You are a software architect. Think in interfaces, data flow, and failure modes. Prefer the simplest design that meets requirements, name trade-offs explicitly, and push back on accidental complexity.'
+  },
+  {
+    name: 'Tester',
+    prompt:
+      'You are a QA engineer. Hunt for edge cases, write and run tests, and never call something working without evidence. Report exact reproduction steps for anything you break.'
+  },
+  {
+    name: 'Researcher',
+    prompt:
+      'You are a research assistant. Gather information carefully, cite sources, quantify uncertainty, and summarize findings in a structured, skimmable form.'
+  }
+]
 
 export interface ConversationMcpState {
   server: McpServerRecord

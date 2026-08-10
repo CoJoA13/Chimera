@@ -49,7 +49,14 @@ export function Sidebar() {
               }`}
               title={conv.provider}
             />
-            <span className="flex-1 truncate">{conv.title}</span>
+            <span className="flex-1 truncate">
+              {conv.title}
+              {conv.personaName && (
+                <span className="ml-1.5 rounded bg-violet-950/60 px-1 py-px text-[10px] text-violet-300">
+                  {conv.personaName}
+                </span>
+              )}
+            </span>
             {unreadBusByConv[conv.id] && (
               <Network size={12} className="shrink-0 text-violet-400" aria-label="New bus message" />
             )}

@@ -59,17 +59,75 @@ describe('BusCore', () => {
   it('notifies await-state changes for UI indicators', async () => {
     makeSession(core, 'a', 'A')
     makeSession(core, 'b', 'B')
-    const changes: [string, string | null][] = []
-    core.onAwaitChange = (localId, peer) => changes.push([localId, peer])
+    const changes: [string, string[]][] = []
+    core.onAwaitChange = (localId, peers) => changes.push([localId, peers])
     const id = core.send('a', 'b', 'question', true)
     const pending = core.awaitReply('a', id, 5)
-    expect(changes).toEqual([['a', 'b']])
+    expect(changes).toEqual([['a', ['b']]])
     core.reply('b', id, 'answer')
     await pending
     expect(changes).toEqual([
-      ['a', 'b'],
-      ['a', null]
+      ['a', ['b']],
+      ['a', []]
     ])
+  })
+
+  it('broadcasts to every other session', () => {
+    makeSession(core, 'a', 'A')
+    const b = makeSession(core, 'b', 'B')
+    const c = makeSession(core, 'c', 'C')
+    const results = core.broadcast('a', 'hello everyone', true)
+    expect(results).toHaveLength(2)
+    expect(results.every((r) => r.messageId)).toBe(true)
+    expect(b.delivered).toHaveLength(1)
+    expect(c.delivered).toHaveLength(1)
+  })
+
+  it('collects broadcast replies with await_replies, partial on timeout', async () => {
+    vi.useFakeTimers()
+    makeSession(core, 'a', 'A')
+    makeSession(core, 'b', 'B')
+    makeSession(core, 'c', 'C')
+    const results = core.broadcast('a', 'question for all', true)
+    const ids = results.map((r) => r.messageId!)
+    const pending = core.awaitReplies('a', ids, 5)
+    // Only B replies; C stays silent.
+    core.reply('b', ids[0], 'B answer')
+    await vi.advanceTimersByTimeAsync(5100)
+    const replies = await pending
+    expect(replies).toHaveLength(2)
+    expect(replies[0].result).toEqual({ status: 'replied', text: 'B answer' })
+    expect(replies[1].result.status).toBe('timeout')
+    vi.useRealTimers()
+  })
+
+  it('resolves await_replies immediately when all reply', async () => {
+    makeSession(core, 'a', 'A')
+    makeSession(core, 'b', 'B')
+    makeSession(core, 'c', 'C')
+    const ids = core.broadcast('a', 'quick question', true).map((r) => r.messageId!)
+    const pending = core.awaitReplies('a', ids, 60)
+    core.reply('b', ids[0], 'one')
+    core.reply('c', ids[1], 'two')
+    const replies = await pending
+    expect(replies.map((r) => r.result)).toEqual([
+      { status: 'replied', text: 'one' },
+      { status: 'replied', text: 'two' }
+    ])
+  })
+
+  it('supports concurrent awaits to different peers', async () => {
+    makeSession(core, 'a', 'A')
+    makeSession(core, 'b', 'B')
+    makeSession(core, 'c', 'C')
+    const idB = core.send('a', 'b', 'to b', true)
+    const idC = core.send('a', 'c', 'to c', true)
+    const pendingB = core.awaitReply('a', idB, 30)
+    const pendingC = core.awaitReply('a', idC, 30)
+    core.reply('c', idC, 'c first')
+    core.reply('b', idB, 'b second')
+    expect(await pendingC).toEqual({ status: 'replied', text: 'c first' })
+    expect(await pendingB).toEqual({ status: 'replied', text: 'b second' })
   })
 
   it('resolves await_reply when the reply arrives', async () => {
