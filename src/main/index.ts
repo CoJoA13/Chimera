@@ -10,6 +10,22 @@ import { pruneOldData } from './store/maintenance'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+// Keep one data directory across dev and packaged builds (productName differs
+// from the package name, which would otherwise silently fork userData).
+app.setPath('userData', join(app.getPath('appData'), 'chimera'))
+
+// Single instance: schedules/watchers/federation must not run twice over one DB.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+}
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+})
+
 let mainWindow: BrowserWindow | null = null
 const sessionManager = new SessionManager(() => mainWindow?.webContents ?? null)
 

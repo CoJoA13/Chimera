@@ -53,6 +53,23 @@ class PushStream implements AsyncIterable<SDKUserMessage> {
   }
 }
 
+/**
+ * Locate the Agent SDK's bundled CLI, translating asar paths to their unpacked
+ * location when packaged. Returns undefined to let the SDK use its default in
+ * dev (where resolution works normally).
+ */
+function findBundledClaudeCli(): string | undefined {
+  try {
+    const require = createRequire(import.meta.url)
+    const pkg = require.resolve('@anthropic-ai/claude-agent-sdk-linux-x64/package.json')
+    const bin = join(dirname(pkg), 'claude').replace('app.asar', 'app.asar.unpacked')
+    if (existsSync(bin)) return bin
+  } catch {
+    // fall through
+  }
+  return undefined
+}
+
 class ClaudeSession implements ProviderSession {
   readonly localId: string
   providerSessionId: string | null = null
@@ -80,6 +97,9 @@ class ClaudeSession implements ProviderSession {
     const options: Options = {
       model: opts.model,
       cwd: opts.cwd ?? homedir(),
+      // Packaged: the bundled CLI lives outside the asar archive; the SDK's own
+      // resolution would point inside it, which cannot be spawned.
+      pathToClaudeCodeExecutable: findBundledClaudeCli(),
       includePartialMessages: true,
       permissionMode: opts.permissionMode ?? 'default',
       // Permits switching the live session into bypassPermissions later; the

@@ -37,6 +37,15 @@ function codexMcpConfig(opts: CreateSessionOptions): CodexConfig {
   return { mcp_servers: mcpServers } as CodexConfig
 }
 
+function findCodexCliPath(): string | null {
+  const candidates = [
+    join(homedir(), '.local', 'bin', 'codex'),
+    '/usr/local/bin/codex',
+    '/usr/bin/codex'
+  ]
+  return candidates.find((c) => existsSync(c)) ?? null
+}
+
 class CodexSession implements ProviderSession {
   readonly localId: string
   providerSessionId: string | null = null
@@ -52,7 +61,12 @@ class CodexSession implements ProviderSession {
   constructor(localId: string, private readonly opts: CreateSessionOptions, resumeThreadId?: string) {
     this.localId = localId
     this.model = opts.model
-    this.codex = new Codex({ config: codexMcpConfig(opts) })
+    // Desktop-launched apps don't inherit the shell PATH — resolve codex explicitly.
+    const cli = findCodexCliPath()
+    this.codex = new Codex({
+      config: codexMcpConfig(opts),
+      ...(cli ? { codexPathOverride: cli } : {})
+    })
     this.thread = resumeThreadId
       ? this.codex.resumeThread(resumeThreadId, this.threadOptions())
       : this.codex.startThread(this.threadOptions())
@@ -357,12 +371,7 @@ export class CodexProvider implements ChatProvider {
   }
 
   private findCodexCli(): string | null {
-    const candidates = [
-      join(homedir(), '.local', 'bin', 'codex'),
-      '/usr/local/bin/codex',
-      '/usr/bin/codex'
-    ]
-    return candidates.find((c) => existsSync(c)) ?? null
+    return findCodexCliPath()
   }
 
   async authStatus(): Promise<AuthStatus> {

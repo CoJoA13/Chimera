@@ -16,6 +16,7 @@ asarUnpack:
 linux:
   target:
     - AppImage
-    - rpm
   category: Utility
+  synopsis: Multi-agent AI chat with a cross-provider bus
+  syncDesktopName: true
 npmRebuild: false

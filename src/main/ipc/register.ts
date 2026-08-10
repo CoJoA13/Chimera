@@ -59,6 +59,7 @@ import { secondOpinion } from '../secondOpinion'
 import { summarizeBrief } from '../titles'
 import type { FederationManager } from '../federation'
 import { exportBackup } from '../store/maintenance'
+import { isAutostartEnabled, setAutostart, autostartNote } from '../autostart'
 import {
   listMcpServers,
   addMcpServer,
@@ -607,6 +608,14 @@ export function registerIpc(
   })
 
   ipcMain.handle(IPC.backupExport, () => exportBackup())
+  ipcMain.handle(IPC.autostartGet, () => ({
+    enabled: isAutostartEnabled(),
+    note: autostartNote()
+  }))
+  ipcMain.handle(IPC.autostartSet, (_e, payload: unknown) => {
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(payload)
+    setAutostart(enabled)
+  })
 
   // generic settings
   ipcMain.handle(IPC.settingsGet, (_e, payload: unknown) => {

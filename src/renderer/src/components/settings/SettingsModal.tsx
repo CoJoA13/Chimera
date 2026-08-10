@@ -1,5 +1,38 @@
-import { useState } from 'react'
-import { X, CircleCheck, CircleAlert } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { X, CircleCheck, CircleAlert, Rocket } from 'lucide-react'
+
+function AutostartToggle() {
+  const [state, setState] = useState<{ enabled: boolean; note: string | null } | null>(null)
+  useEffect(() => {
+    void window.chimera.getAutostart().then(setState)
+  }, [])
+  if (!state) return null
+  return (
+    <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-4">
+      <div className="flex items-center gap-2">
+        <Rocket size={15} className={state.enabled ? 'text-cyan-400' : 'text-slate-500'} />
+        <span className="text-sm font-medium text-slate-200">Launch at login</span>
+        <label className="ml-auto flex items-center gap-1.5 text-xs text-slate-400">
+          <input
+            type="checkbox"
+            checked={state.enabled}
+            onChange={(e) =>
+              void window.chimera
+                .setAutostart(e.target.checked)
+                .then(() => window.chimera.getAutostart().then(setState))
+            }
+          />
+          enabled
+        </label>
+      </div>
+      <p className="mt-1 text-xs text-slate-500">
+        Schedules, watchers, missions, and federation only run while Chimera is open — autostart
+        keeps your agents working from login.
+      </p>
+      {state.note && <p className="mt-1 text-xs text-amber-400">{state.note}</p>}
+    </div>
+  )
+}
 import { useChat } from '../../stores/chat'
 import { McpPane } from './McpPane'
 import { ConnectorsPane } from './ConnectorsPane'
@@ -59,6 +92,7 @@ export function SettingsModal() {
           <div className="flex-1 overflow-y-auto p-4">
             {tab === 'Providers' && (
               <div className="space-y-3">
+                <AutostartToggle />
                 <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-4">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-slate-200">Claude</span>

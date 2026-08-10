@@ -7,6 +7,7 @@
   "license": "MIT",
   "private": true,
   "type": "module",
+  "desktopName": "chimera.desktop",
   "scripts": {
     "dev": "electron-vite dev --watch",
     "build": "electron-vite build",
