@@ -38,6 +38,13 @@ export type Block =
       isReply: boolean
       memberName?: string
     }
+  | {
+      kind: 'verification'
+      id: string
+      verdict: 'corroborated' | 'disputed' | 'uncertain'
+      note: string
+      verifier: string
+    }
 
 export interface PendingPermission {
   requestId: string
@@ -537,6 +544,19 @@ export const useChat = create<ChatState>((set, get) => ({
         if (ev.direction === 'in' && convId !== s.activeConvId) {
           set((st) => ({ unreadBusByConv: { ...st.unreadBusByConv, [convId]: true } }))
         }
+        break
+
+      case 'verification':
+        setBlocks([
+          ...blocks,
+          {
+            kind: 'verification',
+            id: crypto.randomUUID(),
+            verdict: ev.verdict,
+            note: ev.note,
+            verifier: ev.verifier
+          }
+        ])
         break
 
       case 'bus.status':

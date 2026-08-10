@@ -95,6 +95,22 @@ const api: ChimeraApi = {
   setDailyBudget: (budgetUsd: number | null) =>
     ipcRenderer.invoke(IPC.usageSetBudget, { budgetUsd }),
   getMemory: (conversationId: string) => ipcRenderer.invoke(IPC.memoryGet, { conversationId }),
+  listMissions: () => ipcRenderer.invoke(IPC.missionsList),
+  addMission: (title: string, goal: string, conversationId: string, cadence: unknown) =>
+    ipcRenderer.invoke(IPC.missionsAdd, { title, goal, conversationId, cadence }),
+  removeMission: (id: string) => ipcRenderer.invoke(IPC.missionsRemove, { id }),
+  setAutoVerify: (conversationId: string, enabled: boolean) =>
+    ipcRenderer.invoke(IPC.verifySet, { conversationId, enabled }),
+  secondOpinion: (conversationId: string, provider: ProviderId, model: string) =>
+    ipcRenderer.invoke(IPC.replayRun, { conversationId, provider, model }),
+  getBrief: () => ipcRenderer.invoke(IPC.briefGet),
+  markBriefRead: () => ipcRenderer.invoke(IPC.briefMarkRead),
+  fedStatus: () => ipcRenderer.invoke(IPC.fedStatus),
+  fedSetEnabled: (enabled: boolean) => ipcRenderer.invoke(IPC.fedSetEnabled, { enabled }),
+  fedSetName: (name: string) => ipcRenderer.invoke(IPC.fedSetName, { name }),
+  fedListPeers: () => ipcRenderer.invoke(IPC.fedPeers),
+  fedAddPeer: (name: string, url: string) => ipcRenderer.invoke(IPC.fedAddPeer, { name, url }),
+  fedRemovePeer: (id: string) => ipcRenderer.invoke(IPC.fedRemovePeer, { id }),
   forkConversation: (conversationId: string) =>
     ipcRenderer.invoke(IPC.conversationFork, { conversationId }),
   searchAll: (query: string) => ipcRenderer.invoke(IPC.searchAll, { query }),

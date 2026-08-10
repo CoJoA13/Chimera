@@ -9,6 +9,8 @@ import {
   Inbox
 } from 'lucide-react'
 import { useChat } from '../../stores/chat'
+import { MissionsSection } from './MissionsSection'
+import { BriefSection } from './BriefSection'
 
 interface TimelineRow {
   messageId: string
@@ -78,8 +80,10 @@ export function ControlRoom() {
 
   return (
     <div className="flex flex-1 gap-4 overflow-hidden p-4">
-      {/* Left: conference panel + inbound reports */}
+      {/* Left: brief + missions + conference + inbound reports */}
       <div className="flex w-[380px] shrink-0 flex-col gap-4 overflow-y-auto">
+        <BriefSection />
+        <MissionsSection />
         <section className="rounded-xl border border-[#30363d] bg-[#10151c] p-4">
           <div className="mb-3 flex items-center gap-2 text-slate-100">
             <Radio size={16} className="text-cyan-400" />

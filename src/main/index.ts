@@ -5,6 +5,7 @@ import { registerIpc } from './ipc/register'
 import { SessionManager } from './ipc/sessions'
 import { startScheduler } from './scheduler'
 import { WatcherManager } from './watcherManager'
+import { FederationManager } from './federation'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -47,10 +48,12 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   const watcherManager = new WatcherManager(sessionManager)
-  registerIpc(sessionManager, watcherManager)
+  const federationManager = new FederationManager(sessionManager.getBus())
+  registerIpc(sessionManager, watcherManager, federationManager)
   sessionManager.initBusDirectory()
   startScheduler(sessionManager)
   watcherManager.start()
+  void federationManager.start()
   createWindow()
 
   app.on('activate', () => {

@@ -2,6 +2,9 @@ import { z } from 'zod'
 import { BusCore, DEFAULT_AWAIT_SECONDS, MAX_AWAIT_SECONDS } from './BusCore'
 import { readMemory, saveMemory } from '../store/memory'
 import { storeArtifact } from '../store/artifacts'
+import { updateMissionProgress, missionsForConversation } from '../store/missions'
+import { saveSkill } from '../store/skills'
+import { logActivity } from '../store/activity'
 import {
   addSchedule,
   listSchedules,
@@ -303,6 +306,63 @@ export function busToolDefs(core: BusCore, callerLocalId: string): BusToolDef[] 
         if (!mine) return fail('No such schedule on this session')
         removeSchedule(args.schedule_id)
         return ok({ status: 'deleted' })
+      }
+    },
+    {
+      name: 'update_mission',
+      description:
+        'Report progress on a mission assigned to this session. Call after each mission check-in increment.',
+      schema: {
+        mission_id: z.string().describe('The mission id from the check-in prompt'),
+        progress: z.string().describe('One-line summary of current progress'),
+        status: z
+          .enum(['active', 'paused', 'done'])
+          .optional()
+          .describe('Set "done" only when the goal is fully achieved')
+      },
+      handler: async (raw): Promise<BusToolResult> => {
+        const args = raw as unknown as {
+          mission_id: string
+          progress: string
+          status?: 'active' | 'paused' | 'done'
+        }
+        debug(callerLocalId, 'update_mission', args)
+        const mine = missionsForConversation(callerLocalId)
+        if (!mine.some((m) => m.id === args.mission_id)) {
+          return fail('No such mission assigned to this session')
+        }
+        try {
+          updateMissionProgress(args.mission_id, args.progress.slice(0, 300), args.status)
+          logActivity('mission', `Mission progress: ${args.progress.slice(0, 120)}`, callerLocalId)
+          return ok({ status: 'updated' })
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err))
+        }
+      }
+    },
+    {
+      name: 'save_skill',
+      description:
+        'Distill a reusable technique into the shared skill library (loaded into every future Claude session). Use after solving a nontrivial problem whose METHOD would help again: capture the approach, not the specific answer.',
+      schema: {
+        name: z.string().describe('Short skill name, e.g. "debug-electron-ipc"'),
+        description: z
+          .string()
+          .describe('One line: when should a future agent reach for this skill?'),
+        instructions: z
+          .string()
+          .describe('The distilled method as markdown: steps, pitfalls, verification')
+      },
+      handler: async (raw): Promise<BusToolResult> => {
+        const args = raw as unknown as { name: string; description: string; instructions: string }
+        debug(callerLocalId, 'save_skill', { name: args.name })
+        try {
+          const slug = saveSkill(args.name, args.description, args.instructions)
+          logActivity('skill', `New distilled skill: ${slug}`, callerLocalId)
+          return ok({ status: 'saved', slug, note: 'Loads into Claude sessions started from now on.' })
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err))
+        }
       }
     },
     {

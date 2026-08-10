@@ -16,6 +16,7 @@ interface Row {
   kind: string
   group_id: string | null
   fork_pending: number
+  auto_verify: number
   created_at: number
   updated_at: number
 }
@@ -34,6 +35,7 @@ function toRecord(row: Row): ConversationRecord {
     kind: (row.kind as ConversationRecord['kind']) ?? 'single',
     groupId: row.group_id,
     forkPending: row.fork_pending === 1,
+    autoVerify: row.auto_verify === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }
@@ -106,6 +108,7 @@ export function createConversation(
     kind: opts.kind ?? 'single',
     groupId: opts.groupId ?? null,
     forkPending: false,
+    autoVerify: false,
     createdAt: now,
     updatedAt: now
   }
@@ -204,6 +207,10 @@ export function createForkOf(sourceId: string): ConversationRecord {
     )
     .run(source.providerSessionId, source.cwd, source.permissionMode, record.id)
   return getConversation(record.id)!
+}
+
+export function setAutoVerify(id: string, enabled: boolean): void {
+  getDb().prepare('UPDATE conversations SET auto_verify = ? WHERE id = ?').run(enabled ? 1 : 0, id)
 }
 
 export function clearForkPending(id: string): void {

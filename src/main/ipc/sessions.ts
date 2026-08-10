@@ -19,6 +19,9 @@ import {
   renameConversation
 } from '../store/conversations'
 import { generateTitle } from '../titles'
+import { crossVerify } from '../verifier'
+import { distilledPluginPath } from '../store/skills'
+import { logActivity } from '../store/activity'
 import { enabledMcpForConversation } from '../store/mcp'
 import { isAlwaysAllowed, addAlwaysAllowRule } from '../store/permissions'
 import { enabledPluginPaths } from '../store/plugins'
@@ -91,6 +94,8 @@ interface LiveSession {
   sender: EventSender
   conversationId: string
   status: 'idle' | 'busy'
+  /** Final text of the in-flight turn, for auto-verification. */
+  lastAnswer?: string
 }
 
 interface PendingPermission {
@@ -209,6 +214,11 @@ export class SessionManager {
             expectsReply: msg.expectsReply
           })
         }
+        logActivity(
+          'report',
+          `${getConversation(msg.from)?.title ?? 'An agent'} → Control Room: ${msg.text}`,
+          msg.from
+        )
         this.notify(
           msg.from,
           'Message for the Control Room',
@@ -457,11 +467,19 @@ export class SessionManager {
       forkSession: conversation.forkPending || undefined,
       systemPromptAppend: BUS_INSTRUCTIONS + personaAppend + groupAppend + memoryAppend,
       mcpServers,
-      plugins: conversation.provider === 'claude' ? enabledPluginPaths() : undefined,
+      plugins:
+        conversation.provider === 'claude'
+          ? [...enabledPluginPaths(), { type: 'local' as const, path: distilledPluginPath() }]
+          : undefined,
       onEvent: (ev: SessionEvent) => {
         if (ev.type === 'session.registered') {
           setProviderSessionId(conversationId, ev.providerSessionId)
           if (conversation.forkPending) clearForkPending(conversationId)
+        }
+        // Track the turn's final answer text for auto-verification.
+        if (ev.type === 'text.done') {
+          const live = this.sessions.get(localId)
+          if (live) live.lastAnswer = ev.text
         }
         const live = this.sessions.get(localId)
         if (live) {
@@ -472,6 +490,28 @@ export class SessionManager {
         }
         if (ev.type === 'turn.completed') {
           if (ev.costUsd) recordSpend(conversationId, ev.costUsd)
+          // Auto-verification: check the answer with the OTHER provider, async.
+          const live2 = this.sessions.get(localId)
+          const answer = live2?.lastAnswer
+          if (live2) live2.lastAnswer = undefined
+          const current = getConversation(conversationId)
+          if (current?.autoVerify && !ev.isError && answer && answer.length > 150) {
+            void crossVerify(answer, current.provider).then((verdict) => {
+              if (!verdict) return
+              this.sessions.get(localId)?.sender.push({
+                type: 'verification',
+                localId: streamId,
+                turnId: ev.turnId,
+                verdict: verdict.verdict,
+                note: verdict.note,
+                verifier: verdict.verifier
+              })
+              if (verdict.verdict === 'disputed') {
+                this.notify(streamId, 'Verification dispute', verdict.note)
+                logActivity('verify', `Disputed answer: ${verdict.note}`, conversationId)
+              }
+            })
+          }
           const title = getConversation(streamId)?.title ?? 'Conversation'
           this.notify(
             streamId,
@@ -689,6 +729,11 @@ export class SessionManager {
     } else {
       await this.restart(conversationId)
     }
+  }
+
+  /** For federation: the bus core to expose/mirror sessions on. */
+  getBus(): BusCore {
+    return this.bus
   }
 
   isBusy(conversationId: string): boolean {

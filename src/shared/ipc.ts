@@ -174,6 +174,40 @@ export interface ChimeraApi {
   // memory
   getMemory(conversationId: string): Promise<string>
 
+  // missions
+  listMissions(): Promise<
+    {
+      id: string
+      title: string
+      goal: string
+      conversationId: string
+      status: 'active' | 'paused' | 'done'
+      progress: string | null
+      updatedAt: number
+    }[]
+  >
+  addMission(
+    title: string,
+    goal: string,
+    conversationId: string,
+    cadence: { type: 'interval'; minutes: number } | { type: 'daily'; time: string }
+  ): Promise<void>
+  removeMission(id: string): Promise<void>
+
+  // verification / replay / brief
+  setAutoVerify(conversationId: string, enabled: boolean): Promise<void>
+  secondOpinion(conversationId: string, provider: ProviderId, model: string): Promise<string>
+  getBrief(): Promise<{ summary: string | null; items: { ts: number; kind: string; text: string }[] }>
+  markBriefRead(): Promise<void>
+
+  // federation
+  fedStatus(): Promise<{ enabled: boolean; address: string | null; name: string }>
+  fedSetEnabled(enabled: boolean): Promise<void>
+  fedSetName(name: string): Promise<void>
+  fedListPeers(): Promise<{ id: string; name: string; url: string }[]>
+  fedAddPeer(name: string, url: string): Promise<void>
+  fedRemovePeer(id: string): Promise<void>
+
   // fork / search / settings
   forkConversation(conversationId: string): Promise<ConversationRecord>
   searchAll(query: string): Promise<{ conversationId: string; title: string; snippet: string }[]>
@@ -232,6 +266,19 @@ export const IPC = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   uiConversationsChanged: 'ui:conversationsChanged',
+  missionsList: 'missions:list',
+  missionsAdd: 'missions:add',
+  missionsRemove: 'missions:remove',
+  verifySet: 'verify:set',
+  replayRun: 'replay:run',
+  briefGet: 'brief:get',
+  briefMarkRead: 'brief:markRead',
+  fedStatus: 'fed:status',
+  fedSetEnabled: 'fed:setEnabled',
+  fedSetName: 'fed:setName',
+  fedPeers: 'fed:peers',
+  fedAddPeer: 'fed:addPeer',
+  fedRemovePeer: 'fed:removePeer',
   sessionInterrupt: 'session:interrupt',
   sessionSetModel: 'session:setModel',
   sessionDispose: 'session:dispose',

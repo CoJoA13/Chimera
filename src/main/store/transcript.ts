@@ -14,7 +14,8 @@ const RENDERABLE = new Set<SessionEvent['type']>([
   'tool.started',
   'tool.output',
   'bus.message',
-  'turn.completed'
+  'turn.completed',
+  'verification'
 ])
 
 export function recordTranscriptEvent(conversationId: string, ev: SessionEvent): void {

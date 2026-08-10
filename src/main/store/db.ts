@@ -118,6 +118,33 @@ const MIGRATIONS: string[] = [
   `,
   `
   ALTER TABLE conversations ADD COLUMN fork_pending INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN auto_verify INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE IF NOT EXISTS missions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    schedule_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    progress TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    text TEXT NOT NULL,
+    conversation_id TEXT
+  );
+  CREATE TABLE IF NOT EXISTS fed_peers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    added_at INTEGER NOT NULL
+  );
   `
 ]
 

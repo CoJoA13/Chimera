@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import type { SessionManager } from './ipc/sessions'
 import { listWatchers, setWatcherState, type WatcherRecord } from './store/watchers'
 import { getConversation } from './store/conversations'
+import { logActivity } from './store/activity'
 
 const GIT_POLL_MS = 60_000
 const FILE_DEBOUNCE_MS = 5_000
@@ -93,6 +94,7 @@ export class WatcherManager {
   private async fire(record: WatcherRecord, reason: string): Promise<void> {
     const conversation = getConversation(record.conversationId)
     if (!conversation) return
+    logActivity('watcher', `Triggered "${conversation.title}": ${reason}`, conversation.id)
     const text = `[Watcher triggered: ${reason}] ${record.prompt}`
     try {
       if (conversation.kind === 'group') {

@@ -45,7 +45,12 @@ import {
 import { todaySpend, spendByConversation } from '../store/spend'
 import { getSetting, setSetting } from '../store/settings'
 import { readMemory, deleteMemory } from '../store/memory'
-import { getConversation } from '../store/conversations'
+import { getConversation, setAutoVerify } from '../store/conversations'
+import { listMissions, addMission, removeMission } from '../store/missions'
+import { activitySince } from '../store/activity'
+import { secondOpinion } from '../secondOpinion'
+import { summarizeBrief } from '../titles'
+import type { FederationManager } from '../federation'
 import {
   listMcpServers,
   addMcpServer,
@@ -79,7 +84,11 @@ const transportSchema = z.union([
   })
 ])
 
-export function registerIpc(manager: SessionManager, watchers?: WatcherManager): void {
+export function registerIpc(
+  manager: SessionManager,
+  watchers?: WatcherManager,
+  federation?: FederationManager
+): void {
   // conversations
   ipcMain.handle(IPC.conversationList, () => listConversations())
   ipcMain.handle(IPC.conversationCreate, (_e, payload: unknown) => {
@@ -454,7 +463,6 @@ export function registerIpc(manager: SessionManager, watchers?: WatcherManager):
     return group
   })
 
-  // schedules
   const cadenceSchema = z.union([
     z.object({ type: z.literal('interval'), minutes: z.number().min(5).max(10080) }),
     z.object({ type: z.literal('daily'), time: z.string().regex(/^\d{2}:\d{2}$/) })
@@ -497,6 +505,72 @@ export function registerIpc(manager: SessionManager, watchers?: WatcherManager):
   ipcMain.handle(IPC.memoryGet, (_e, payload: unknown) => {
     const { conversationId } = z.object({ conversationId: idSchema }).parse(payload)
     return readMemory(conversationId)
+  })
+
+  // missions
+  ipcMain.handle(IPC.missionsList, () => listMissions())
+  ipcMain.handle(IPC.missionsAdd, (_e, payload: unknown) => {
+    const { title, goal, conversationId, cadence } = z
+      .object({
+        title: z.string().min(1).max(80),
+        goal: z.string().min(1).max(2000),
+        conversationId: idSchema,
+        cadence: cadenceSchema
+      })
+      .parse(payload)
+    addMission(title, goal, conversationId, cadence)
+  })
+  ipcMain.handle(IPC.missionsRemove, (_e, payload: unknown) => {
+    removeMission(z.object({ id: idSchema }).parse(payload).id)
+  })
+
+  // verification / replay / brief
+  ipcMain.handle(IPC.verifySet, (_e, payload: unknown) => {
+    const { conversationId, enabled } = z
+      .object({ conversationId: idSchema, enabled: z.boolean() })
+      .parse(payload)
+    setAutoVerify(conversationId, enabled)
+  })
+  ipcMain.handle(IPC.replayRun, (_e, payload: unknown) => {
+    const { conversationId, provider, model } = z
+      .object({ conversationId: idSchema, provider: providerSchema, model: z.string().min(1) })
+      .parse(payload)
+    return secondOpinion(conversationId, provider, model)
+  })
+  ipcMain.handle(IPC.briefGet, async () => {
+    const since = getSetting<number>('lastBriefTs', Date.now() - 86_400_000)
+    const items = activitySince(since)
+    const summary =
+      items.length >= 3 ? await summarizeBrief(items.map((i) => `[${i.kind}] ${i.text}`)) : null
+    return { summary, items: items.map((i) => ({ ts: i.ts, kind: i.kind, text: i.text })) }
+  })
+  ipcMain.handle(IPC.briefMarkRead, () => {
+    setSetting('lastBriefTs', Date.now())
+  })
+
+  // federation
+  ipcMain.handle(IPC.fedStatus, () => ({
+    enabled: getSetting<boolean>('fedEnabled', false),
+    address: federation?.address() ?? null,
+    name: getSetting<string>('fedName', 'chimera')
+  }))
+  ipcMain.handle(IPC.fedSetEnabled, async (_e, payload: unknown) => {
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(payload)
+    await federation?.setEnabled(enabled)
+  })
+  ipcMain.handle(IPC.fedSetName, (_e, payload: unknown) => {
+    const { name } = z.object({ name: z.string().min(1).max(40) }).parse(payload)
+    setSetting('fedName', name)
+  })
+  ipcMain.handle(IPC.fedPeers, () => federation?.listPeers() ?? [])
+  ipcMain.handle(IPC.fedAddPeer, (_e, payload: unknown) => {
+    const { name, url } = z
+      .object({ name: z.string().min(1).max(40), url: z.string().url() })
+      .parse(payload)
+    federation?.addPeer(name, url)
+  })
+  ipcMain.handle(IPC.fedRemovePeer, (_e, payload: unknown) => {
+    federation?.removePeer(z.object({ id: idSchema }).parse(payload).id)
   })
 
   // fork

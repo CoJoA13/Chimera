@@ -83,3 +83,12 @@ export type SessionEvent =
       peerCount?: number
     }
   | ({ type: 'session.error'; localId: string; message: string; fatal: boolean } & MemberTag)
+  /** Cross-model auto-verification result for the preceding assistant answer. */
+  | {
+      type: 'verification'
+      localId: string
+      turnId: string
+      verdict: 'corroborated' | 'disputed' | 'uncertain'
+      note: string
+      verifier: string
+    }

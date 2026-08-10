@@ -1,6 +1,7 @@
 import type { SessionManager } from './ipc/sessions'
 import { dueSchedules, markRan, postpone } from './store/schedules'
 import { getConversation, listGroupMembers } from './store/conversations'
+import { logActivity } from './store/activity'
 
 const TICK_MS = 30_000
 const BUSY_RETRY_MS = 120_000
@@ -29,6 +30,7 @@ export function startScheduler(manager: SessionManager): void {
               continue
             }
             markRan(schedule.id, schedule.cadence)
+            logActivity('schedule', `Ran in "${conversation.title}": ${schedule.prompt}`, conversation.id)
             await manager.groupSend(conversation.id, `[Scheduled task] ${schedule.prompt}`)
           } else {
             if (manager.isBusy(conversation.id)) {
@@ -36,6 +38,7 @@ export function startScheduler(manager: SessionManager): void {
               continue
             }
             markRan(schedule.id, schedule.cadence)
+            logActivity('schedule', `Ran in "${conversation.title}": ${schedule.prompt}`, conversation.id)
             await manager.startForConversation(conversation.id)
             await manager.send(conversation.id, `[Scheduled task] ${schedule.prompt}`)
           }

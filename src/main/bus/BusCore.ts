@@ -172,6 +172,24 @@ export class BusCore {
     this.route(reply)
   }
 
+  /**
+   * Inject a message that originated OUTSIDE this bus (federation). Registers
+   * it for reply correlation; resolves a matching await if it is a reply.
+   */
+  injectExternal(msg: BusMessage): void {
+    this.messages.set(msg.messageId, msg)
+    if (msg.inReplyTo) {
+      const awaiting = this.removeAwait(msg.inReplyTo)
+      if (awaiting) {
+        this.onExchange?.(msg, 'replied')
+        awaiting.resolve({ status: 'replied', text: msg.text })
+        return
+      }
+    }
+    this.onExchange?.(msg, 'sent')
+    this.route(msg)
+  }
+
   /** Send the same message to every other registered session. */
   broadcast(
     fromLocalId: string,

@@ -28,6 +28,8 @@ export interface ConversationRecord {
   groupId: string | null
   /** Fork created but not yet branched: first session start uses forkSession. */
   forkPending: boolean
+  /** Cross-model verification annotations on this conversation's answers. */
+  autoVerify: boolean
   /** Populated on kind='group' records when listing. */
   groupMembers?: { id: string; title: string; provider: ProviderId }[]
   createdAt: number

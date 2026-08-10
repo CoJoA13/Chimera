@@ -123,6 +123,95 @@ describe('agent-managed schedules', () => {
   })
 })
 
+describe('federation bus injection', () => {
+  it('routes external messages and resolves awaits on external replies', async () => {
+    const core = new BusCore()
+    const delivered: string[] = []
+    core.register(
+      'local-a',
+      () => ({
+        localId: 'local-a',
+        conversationId: 'local-a',
+        title: 'A',
+        provider: 'claude',
+        status: 'idle'
+      }),
+      (msg) => delivered.push(msg.text)
+    )
+    // Inbound federated message routes to the local session.
+    core.injectExternal({
+      messageId: 'fed-msg-1',
+      from: 'fed:peer:remote-1',
+      to: 'local-a',
+      text: 'hello from another machine',
+      expectsReply: true
+    })
+    expect(delivered).toEqual(['hello from another machine'])
+
+    // Local session sends out and awaits; an external reply resolves it.
+    core.register(
+      'fed:peer:remote-1',
+      () => ({
+        localId: 'fed:peer:remote-1',
+        conversationId: 'fed:peer:remote-1',
+        title: 'Remote',
+        provider: 'remote',
+        status: 'idle'
+      }),
+      () => {}
+    )
+    const outId = core.send('local-a', 'fed:peer:remote-1', 'question', true)
+    const pending = core.awaitReply('local-a', outId, 10)
+    core.injectExternal({
+      messageId: 'fed-reply-1',
+      from: 'fed:peer:remote-1',
+      to: 'local-a',
+      text: 'remote answer',
+      inReplyTo: outId,
+      expectsReply: false
+    })
+    expect(await pending).toEqual({ status: 'replied', text: 'remote answer' })
+  })
+})
+
+describe('missions', () => {
+  it('creates a mission with a schedule, updates progress, stops on done', async () => {
+    const conv = createConversation('claude', 'claude-sonnet-5', { title: 'Mission conv' })
+    const { addMission, updateMissionProgress, listMissions } = await import(
+      '../src/main/store/missions'
+    )
+    const { listSchedules } = await import('../src/main/store/schedules')
+    const mission = addMission('Test mission', 'Do the thing', conv.id, {
+      type: 'interval',
+      minutes: 60
+    })
+    expect(mission.status).toBe('active')
+    expect(listSchedules().some((s) => s.id === mission.scheduleId)).toBe(true)
+    updateMissionProgress(mission.id, 'halfway there')
+    expect(listMissions().find((m) => m.id === mission.id)?.progress).toBe('halfway there')
+    updateMissionProgress(mission.id, 'complete', 'done')
+    const finished = listMissions().find((m) => m.id === mission.id)!
+    expect(finished.status).toBe('done')
+    expect(listSchedules().some((s) => s.id === mission.scheduleId)).toBe(false)
+  })
+})
+
+describe('skill distillation', () => {
+  it('saves, lists, and deletes skills in the distilled plugin', async () => {
+    const { saveSkill, listSkills, deleteSkill, distilledPluginPath } = await import(
+      '../src/main/store/skills'
+    )
+    const slug = saveSkill('Test Skill Name!', 'When testing skills', '# Steps\n1. do it')
+    expect(slug).toBe('test-skill-name')
+    expect(listSkills().some((s) => s.slug === slug)).toBe(true)
+    const { existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    expect(existsSync(join(distilledPluginPath(), '.claude-plugin', 'plugin.json'))).toBe(true)
+    deleteSkill(slug)
+    expect(listSkills().some((s) => s.slug === slug)).toBe(false)
+  })
+})
+
 describe('templates', () => {
   it('captures a single conversation with persona', () => {
     const conv = createConversation('claude', 'claude-sonnet-5', {

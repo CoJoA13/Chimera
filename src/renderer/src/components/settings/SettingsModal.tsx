@@ -7,6 +7,7 @@ import { PluginsPane } from './PluginsPane'
 import { SchedulesPane } from './SchedulesPane'
 import { UsagePane } from './UsagePane'
 import { WatchersPane } from './WatchersPane'
+import { FederationPane } from './FederationPane'
 
 const TABS = [
   'Providers',
@@ -15,7 +16,8 @@ const TABS = [
   'Plugins',
   'Schedules',
   'Watchers',
-  'Usage'
+  'Usage',
+  'Federation'
 ] as const
 
 export function SettingsModal() {
@@ -118,6 +120,7 @@ export function SettingsModal() {
             {tab === 'Schedules' && <SchedulesPane />}
             {tab === 'Watchers' && <WatchersPane />}
             {tab === 'Usage' && <UsagePane />}
+            {tab === 'Federation' && <FederationPane />}
           </div>
         </div>
       </div>

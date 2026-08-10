@@ -14,6 +14,8 @@ import { ControlRoom } from './components/control/ControlRoom'
 import { TemplateButton } from './components/chat/TemplateButton'
 import { GroupMembersPopover } from './components/chat/GroupMembersPopover'
 import { ForkButton } from './components/chat/ForkButton'
+import { VerifyToggle } from './components/chat/VerifyToggle'
+import { SecondOpinionButton } from './components/chat/SecondOpinionButton'
 import { CommandPalette } from './components/palette/CommandPalette'
 import { OnboardingModal } from './components/onboarding/OnboardingModal'
 import { PermissionDialog } from './components/permissions/PermissionDialog'
@@ -78,6 +80,8 @@ export default function App() {
               <PersonaButton />
               <PermissionModeBadge />
               <ForkButton />
+              <VerifyToggle />
+              <SecondOpinionButton />
             </>
           )}
           {activeView === 'chat' && activeIsGroup && <GroupMembersPopover />}

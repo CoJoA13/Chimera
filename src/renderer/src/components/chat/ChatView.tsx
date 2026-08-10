@@ -5,6 +5,7 @@ import { MarkdownBlock } from './MarkdownBlock'
 import { ToolCallCard } from './ToolCallCard'
 import { ThinkingBlock } from './ThinkingBlock'
 import { BusMessageCard } from './BusMessageCard'
+import { VerificationChip } from './VerificationChip'
 
 const MEMBER_COLORS = [
   'text-orange-300',
@@ -115,6 +116,8 @@ function renderBlock(block: Block) {
           isReply={block.isReply}
         />
       )
+    case 'verification':
+      return <VerificationChip verdict={block.verdict} note={block.note} verifier={block.verifier} />
   }
 }
 
