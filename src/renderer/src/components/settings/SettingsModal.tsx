@@ -26,8 +26,9 @@ function AutostartToggle() {
         </label>
       </div>
       <p className="mt-1 text-xs text-slate-500">
-        Schedules, watchers, missions, and federation only run while Chimera is open — autostart
-        keeps your agents working from login.
+        Closing the window keeps schedules, watchers, missions, and federation running in the
+        system tray. Use the tray menu to reopen or fully quit Chimera; autostart begins that
+        background service at login.
       </p>
       {state.note && <p className="mt-1 text-xs text-amber-400">{state.note}</p>}
     </div>

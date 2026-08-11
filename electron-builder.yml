@@ -10,6 +10,8 @@ files:
 extraResources:
   - from: resources/connectors.json
     to: connectors.json
+  - from: build/icon.png
+    to: icon.png
 # The Agent SDK's bundled CLI must be spawnable — keep it out of asar.
 asarUnpack:
   - node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/**

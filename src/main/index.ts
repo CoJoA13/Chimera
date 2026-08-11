@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, Menu, shell, Tray } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpc } from './ipc/register'
@@ -21,15 +21,44 @@ if (!app.requestSingleInstanceLock()) {
   app.exit(0)
 }
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
-  }
+  showMainWindow()
 })
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+let isQuitting = false
 const sessionManager = new SessionManager(() => mainWindow?.webContents ?? null)
+
+function showMainWindow(): void {
+  if (!app.isReady()) return
+  if (!mainWindow) createWindow()
+  if (mainWindow?.isMinimized()) mainWindow.restore()
+  mainWindow?.show()
+  mainWindow?.focus()
+}
+
+function createTray(): void {
+  if (tray) return
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(__dirname, '../../build/icon.png')
+  tray = new Tray(iconPath)
+  tray.setToolTip('Chimera')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Open Chimera', click: showMainWindow },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: () => {
+          isQuitting = true
+          app.quit()
+        }
+      }
+    ])
+  )
+  tray.on('click', showMainWindow)
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -82,6 +111,11 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return
+    event.preventDefault()
+    mainWindow?.hide()
+  })
 }
 
 app.whenReady().then(() => {
@@ -94,17 +128,19 @@ app.whenReady().then(() => {
   void federationManager.start()
   pruneOldData()
   setInterval(pruneOldData, 24 * 60 * 60 * 1000)
+  createTray()
   createWindow()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    showMainWindow()
   })
 })
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
+// Closing every window keeps background schedules, watchers, missions, and
+// federation alive. The tray menu is the explicit application quit path.
+app.on('window-all-closed', () => {})
 
 app.on('before-quit', () => {
+  isQuitting = true
   void sessionManager.disposeAll()
 })
