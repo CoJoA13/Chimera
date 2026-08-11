@@ -3,8 +3,14 @@ import type { SessionEvent, Usage } from '../../../shared/events'
 import type { AuthStatus } from '../../../shared/ipc'
 import type { ModelInfo } from '../../../shared/models'
 import type { ConversationRecord } from '../../../shared/config-types'
+import {
+  IDLE_ACTIVITY,
+  queuedActivity,
+  reduceAgentActivity,
+  type AgentActivity
+} from '../../../shared/activity'
 
-export type Block =
+export type Block = (
   | { kind: 'user'; id: string; text: string; attachments?: string[] }
   | { kind: 'assistant'; id: string; text: string; streaming: boolean; memberName?: string }
   | { kind: 'thinking'; id: string; text: string; streaming: boolean; memberName?: string }
@@ -45,6 +51,7 @@ export type Block =
       note: string
       verifier: string
     }
+) & { at?: number; turnId?: string; completedAt?: number }
 
 export interface PendingPermission {
   requestId: string
@@ -61,6 +68,7 @@ interface ChatState {
   convByLocal: Record<string, string>
   /** conversationId -> status */
   statusByConv: Record<string, 'idle' | 'streaming'>
+  activityByConv: Record<string, AgentActivity>
   blocksByConv: Record<string, Block[]>
   hydrated: Record<string, boolean>
   /** conversationId -> live await state (peer + how many sessions are awaited) */
@@ -76,6 +84,8 @@ interface ChatState {
   newChatOpen: boolean
   onboardingOpen: boolean
   activeView: 'chat' | 'control'
+  activityInspectorOpen: boolean
+  activityInspectorSelection: string | null
   /** Reports agents sent to the Control Room (bus target: control-room). */
   controlInbound: { fromId: string; messageId: string; text: string; at: number }[]
   toasts: { id: string; text: string; kind: 'error' | 'info' }[]
@@ -117,9 +127,11 @@ interface ChatState {
   /** Refresh the list and select a conversation created outside the store. */
   adoptConversation(id: string): Promise<void>
   setActiveView(view: 'chat' | 'control'): void
+  openActivityInspector(blockId?: string): void
+  closeActivityInspector(): void
   pushToast(text: string, kind?: 'error' | 'info'): void
   dismissToast(id: string): void
-  handleEvent(ev: SessionEvent): void
+  handleEvent(ev: SessionEvent, source?: 'live' | 'replay'): void
 }
 
 let initialized = false
@@ -146,6 +158,7 @@ export const useChat = create<ChatState>((set, get) => ({
   sessionByConv: {},
   convByLocal: {},
   statusByConv: {},
+  activityByConv: {},
   blocksByConv: {},
   hydrated: {},
   busAwaitByConv: {},
@@ -159,6 +172,8 @@ export const useChat = create<ChatState>((set, get) => ({
   newChatOpen: false,
   onboardingOpen: false,
   activeView: 'chat',
+  activityInspectorOpen: false,
+  activityInspectorSelection: null,
   controlInbound: [],
   toasts: [],
 
@@ -239,6 +254,8 @@ export const useChat = create<ChatState>((set, get) => ({
     set((st) => ({
       activeConvId: id,
       activeView: 'chat',
+      activityInspectorSelection: null,
+      activityByConv: { ...st.activityByConv, [id]: IDLE_ACTIVITY },
       unreadBusByConv: { ...st.unreadBusByConv, [id]: false }
     }))
     const s = get()
@@ -266,7 +283,7 @@ export const useChat = create<ChatState>((set, get) => ({
           const replayed = get()
           const existing = replayed.blocksByConv[id] ?? []
           if (existing.length === 0) {
-            for (const ev of history) get().handleEvent({ ...ev, localId })
+            for (const ev of history) get().handleEvent({ ...ev, localId }, 'replay')
           }
         }
         set((st) => ({ hydrated: { ...st.hydrated, [id]: true } }))
@@ -311,14 +328,17 @@ export const useChat = create<ChatState>((set, get) => ({
     const localId = sessionByConv[activeConvId]
     if (!localId || statusByConv[activeConvId] === 'streaming') return
 
+    const blockId = crypto.randomUUID()
+    const queuedAt = Date.now()
     set((s) => ({
+      activityByConv: { ...s.activityByConv, [activeConvId]: queuedActivity(queuedAt) },
       blocksByConv: {
         ...s.blocksByConv,
         [activeConvId]: [
           ...(s.blocksByConv[activeConvId] ?? []),
           {
             kind: 'user',
-            id: crypto.randomUUID(),
+            id: blockId,
             text,
             attachments: attachments?.map((a) => a.path.split('/').pop() ?? a.path)
           }
@@ -330,9 +350,21 @@ export const useChat = create<ChatState>((set, get) => ({
     try {
       if (conv?.kind === 'group') {
         set((st) => ({ statusByConv: { ...st.statusByConv, [activeConvId]: 'streaming' } }))
-        await window.chimera.groupSend(activeConvId, text)
+        const at = await window.chimera.groupSend(activeConvId, text)
+        set((st) => ({
+          blocksByConv: {
+            ...st.blocksByConv,
+            [activeConvId]: updateBlocks(st.blocksByConv[activeConvId] ?? [], blockId, (b) => ({ ...b, at }))
+          }
+        }))
       } else {
-        await window.chimera.sendMessage(localId, text, attachments)
+        const at = await window.chimera.sendMessage(localId, text, attachments)
+        set((st) => ({
+          blocksByConv: {
+            ...st.blocksByConv,
+            [activeConvId]: updateBlocks(st.blocksByConv[activeConvId] ?? [], blockId, (b) => ({ ...b, at }))
+          }
+        }))
       }
     } catch (err) {
       set((st) => ({ statusByConv: { ...st.statusByConv, [activeConvId]: 'idle' } }))
@@ -438,6 +470,14 @@ export const useChat = create<ChatState>((set, get) => ({
     set({ activeView: view })
   },
 
+  openActivityInspector(blockId) {
+    set({ activityInspectorOpen: true, activityInspectorSelection: blockId ?? null })
+  },
+
+  closeActivityInspector() {
+    set({ activityInspectorOpen: false, activityInspectorSelection: null })
+  },
+
   pushToast(text, kind = 'error') {
     const id = crypto.randomUUID()
     set((s) => ({ toasts: [...s.toasts, { id, text, kind }] }))
@@ -448,7 +488,7 @@ export const useChat = create<ChatState>((set, get) => ({
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
   },
 
-  handleEvent(ev) {
+  handleEvent(ev, source = 'live') {
     const s = get()
     // Session localIds are conversation ids; the map only adds indirection for
     // sessions this renderer started. Fall back to the id itself so events from
@@ -457,6 +497,14 @@ export const useChat = create<ChatState>((set, get) => ({
       s.convByLocal[ev.localId] ??
       (s.conversations.some((c) => c.id === ev.localId) ? ev.localId : undefined)
     if (!convId) return
+    if (source === 'live') {
+      set((st) => ({
+        activityByConv: {
+          ...st.activityByConv,
+          [convId]: reduceAgentActivity(st.activityByConv[convId] ?? IDLE_ACTIVITY, ev, source)
+        }
+      }))
+    }
     const blocks = s.blocksByConv[convId] ?? []
     const setBlocks = (next: Block[]): void => {
       set((st) => ({ blocksByConv: { ...st.blocksByConv, [convId]: next } }))
@@ -468,7 +516,7 @@ export const useChat = create<ChatState>((set, get) => ({
         break
 
       case 'user.message':
-        setBlocks([...blocks, { kind: 'user', id: crypto.randomUUID(), text: ev.text }])
+        setBlocks([...blocks, { kind: 'user', id: crypto.randomUUID(), text: ev.text, at: ev.at }])
         break
 
       case 'text.delta':
@@ -486,7 +534,7 @@ export const useChat = create<ChatState>((set, get) => ({
         } else {
           setBlocks([
             ...blocks,
-            { kind, id: ev.blockId, text: ev.text, streaming: true, memberName: ev.memberName }
+            { kind, id: ev.blockId, text: ev.text, streaming: true, memberName: ev.memberName, at: ev.at, turnId: ev.turnId }
           ])
         }
         break
@@ -507,7 +555,7 @@ export const useChat = create<ChatState>((set, get) => ({
         } else if (ev.text.trim()) {
           setBlocks([
             ...blocks,
-            { kind, id: ev.blockId, text: ev.text, streaming: false, memberName: ev.memberName }
+            { kind, id: ev.blockId, text: ev.text, streaming: false, memberName: ev.memberName, at: ev.at, turnId: ev.turnId }
           ])
         }
         break
@@ -523,6 +571,8 @@ export const useChat = create<ChatState>((set, get) => ({
             input: ev.input,
             done: false,
             memberName: ev.memberName
+            ,at: ev.at,
+            turnId: ev.turnId
           }
         ])
         break
@@ -530,7 +580,7 @@ export const useChat = create<ChatState>((set, get) => ({
       case 'tool.output':
         setBlocks(
           updateBlocks(blocks, ev.toolUseId, (b) =>
-            b.kind === 'tool' ? { ...b, output: ev.output, isError: ev.isError, done: true } : b
+            b.kind === 'tool' ? { ...b, output: ev.output, isError: ev.isError, done: true, completedAt: ev.at } : b
           )
         )
         break
@@ -559,6 +609,8 @@ export const useChat = create<ChatState>((set, get) => ({
             isError: ev.isError,
             errorMessage: ev.errorMessage,
             memberName: ev.memberName
+            ,at: ev.at,
+            turnId: ev.turnId
           }
         ])
         break
@@ -574,6 +626,7 @@ export const useChat = create<ChatState>((set, get) => ({
             text: ev.text,
             isReply: ev.inReplyTo !== undefined,
             memberName: ev.memberName
+            ,at: ev.at
           }
         ])
         if (ev.direction === 'in' && convId !== s.activeConvId) {
@@ -590,6 +643,8 @@ export const useChat = create<ChatState>((set, get) => ({
             verdict: ev.verdict,
             note: ev.note,
             verifier: ev.verifier
+            ,at: ev.at,
+            turnId: ev.turnId
           }
         ])
         break
@@ -610,7 +665,7 @@ export const useChat = create<ChatState>((set, get) => ({
         set((st) => ({ statusByConv: { ...st.statusByConv, [convId]: 'idle' } }))
         setBlocks([
           ...blocks,
-          { kind: 'error', id: crypto.randomUUID(), text: ev.message, memberName: ev.memberName }
+          { kind: 'error', id: crypto.randomUUID(), text: ev.message, memberName: ev.memberName, at: ev.at }
         ])
         break
 
