@@ -172,6 +172,9 @@ export class BusCore {
         'This message was already replied to. Do not reply again — the sender has your answer.'
       )
     }
+    if (!this.awaiting.has(inReplyToMessageId) && !this.sessions.has(original.from)) {
+      throw new Error('Reply target is no longer available')
+    }
     this.repliedTo.add(inReplyToMessageId)
     const reply: BusMessage = {
       messageId: randomUUID(),

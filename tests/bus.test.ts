@@ -197,6 +197,14 @@ describe('BusCore', () => {
     expect(a.delivered[0].inReplyTo).toBe(id)
   })
 
+  it('rejects a reply when its unawaited sender is no longer routable', () => {
+    makeSession(core, 'a', 'A')
+    makeSession(core, 'b', 'B')
+    const id = core.send('a', 'b', 'fyi', false)
+    core.unregister('a')
+    expect(() => core.reply('b', id, 'ack')).toThrow(/no longer available/)
+  })
+
   it('caps the inbox for busy sessions', () => {
     makeSession(core, 'a', 'A')
     makeSession(core, 'b', 'B', 'busy')

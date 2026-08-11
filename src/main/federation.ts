@@ -28,6 +28,7 @@ interface WireMessage {
 const FED_PREFIX = 'fed:'
 const FED_MESSAGE_PREFIX = 'fedmsg:'
 const MAX_DELIVERY_BYTES = 256 * 1024
+const INBOUND_PROXY_GRACE_MS = 10 * 60_000
 
 const wireMessageSchema = z.object({
   messageId: z.string().min(1).max(256),
@@ -39,6 +40,15 @@ const wireMessageSchema = z.object({
   inReplyTo: z.string().min(1).max(512).optional(),
   expectsReply: z.boolean()
 })
+
+const remoteSessionsSchema = z.array(
+  z.object({
+    id: z.string().min(1).max(256),
+    title: z.string().min(1).max(200),
+    provider: z.string().min(1).max(80),
+    persona: z.string().max(2000).optional()
+  })
+)
 
 export function validateWireMessage(payload: unknown): WireMessage {
   return wireMessageSchema.parse(payload) as WireMessage
@@ -65,6 +75,9 @@ function remoteReplyId(peerId: string, localId: string | undefined): string | un
  */
 export class FederationManager {
   private server: Server | null = null
+  private syncTimer: NodeJS.Timeout | null = null
+  private proxyIdsByPeer = new Map<string, Set<string>>()
+  private inboundProxyLastSeen = new Map<string, number>()
   private port = 0
 
   constructor(private readonly bus: BusCore) {}
@@ -122,6 +135,10 @@ export class FederationManager {
         if (info.localId.startsWith(`${FED_PREFIX}${peer.id}:`)) this.bus.unregister(info.localId)
       }
     }
+    this.proxyIdsByPeer.delete(id)
+    for (const proxyId of this.inboundProxyLastSeen.keys()) {
+      if (proxyId.startsWith(`${FED_PREFIX}${id}:`)) this.inboundProxyLastSeen.delete(proxyId)
+    }
   }
 
   // ---------- lifecycle ----------
@@ -141,7 +158,9 @@ export class FederationManager {
       this.server = null
     })
     if (this.server) {
-      setInterval(() => void this.syncPeers(), 60_000)
+      if (!this.syncTimer) {
+        this.syncTimer = setInterval(() => void this.syncPeers(), 60_000)
+      }
       void this.syncPeers()
     }
   }
@@ -149,6 +168,8 @@ export class FederationManager {
   stop(): void {
     this.server?.close()
     this.server = null
+    if (this.syncTimer) clearInterval(this.syncTimer)
+    this.syncTimer = null
   }
 
   async setEnabled(enabled: boolean): Promise<void> {
@@ -165,12 +186,27 @@ export class FederationManager {
       try {
         const res = await fetch(`${peer.url}/sessions`, { signal: AbortSignal.timeout(5000) })
         if (!res.ok) continue
-        const sessions = (await res.json()) as {
-          id: string
-          title: string
-          provider: string
-          persona?: string
-        }[]
+        const sessions = remoteSessionsSchema.parse(await res.json())
+        const liveProxyIds = new Set(
+          sessions.map((remote) => `${FED_PREFIX}${peer.id}:${remote.id}`)
+        )
+        const tracked = this.proxyIdsByPeer.get(peer.id) ?? new Set<string>()
+        const retained = new Set(liveProxyIds)
+        const now = Date.now()
+        // A successful session sync is authoritative for outbound discovery,
+        // but a recently seen inbound sender must remain routable long enough
+        // for the local recipient to reply.
+        for (const proxyId of tracked) {
+          if (liveProxyIds.has(proxyId)) continue
+          const lastInbound = this.inboundProxyLastSeen.get(proxyId)
+          if (lastInbound !== undefined && now - lastInbound < INBOUND_PROXY_GRACE_MS) {
+            retained.add(proxyId)
+          } else {
+            this.bus.unregister(proxyId)
+            this.inboundProxyLastSeen.delete(proxyId)
+          }
+        }
+        this.proxyIdsByPeer.set(peer.id, retained)
         for (const remote of sessions) {
           const proxyId = `${FED_PREFIX}${peer.id}:${remote.id}`
           this.bus.register(
@@ -215,6 +251,27 @@ export class FederationManager {
     } catch {
       logActivity('federation', `Delivery to peer "${peer.name}" failed`)
     }
+  }
+
+  private registerInboundSender(peer: FedPeer, wire: WireMessage): string {
+    const senderProxy = `${FED_PREFIX}${peer.id}:${wire.fromId}`
+    this.bus.register(
+      senderProxy,
+      () => ({
+        localId: senderProxy,
+        conversationId: senderProxy,
+        title: wire.fromTitle,
+        provider: 'remote',
+        status: 'idle',
+        persona: wire.fromPersona
+      }),
+      (msg) => void this.deliverToPeer(peer, wire.fromId, msg)
+    )
+    const tracked = this.proxyIdsByPeer.get(peer.id) ?? new Set<string>()
+    tracked.add(senderProxy)
+    this.proxyIdsByPeer.set(peer.id, tracked)
+    this.inboundProxyLastSeen.set(senderProxy, Date.now())
+    return senderProxy
   }
 
   // ---------- inbound ----------
@@ -280,21 +337,9 @@ export class FederationManager {
           // Represent the remote sender as a proxy the local bus can reply to.
           const peer = this.peerForRequest(req)
           const peerId = peer?.id ?? 'loopback'
-          const senderProxy = `${FED_PREFIX}${peerId}:${wire.fromId}`
-          if (peer) {
-            this.bus.register(
-              senderProxy,
-              () => ({
-                localId: senderProxy,
-                conversationId: senderProxy,
-                title: wire.fromTitle,
-                provider: 'remote',
-                status: 'idle',
-                persona: wire.fromPersona
-              }),
-              (msg) => void this.deliverToPeer(peer, wire.fromId, msg)
-            )
-          }
+          const senderProxy = peer
+            ? this.registerInboundSender(peer, wire)
+            : `${FED_PREFIX}${peerId}:${wire.fromId}`
           this.bus.injectExternal({
             messageId: federatedMessageId(peerId, wire.messageId),
             from: senderProxy,
