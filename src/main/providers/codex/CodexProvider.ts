@@ -164,7 +164,7 @@ class CodexSession implements ProviderSession {
         case 'agent_message':
         case 'reasoning': {
           const isText = item.type === 'agent_message'
-          const blockId = `codex:${item.id}`
+          const blockId = `codex:${turnId}:${item.id}`
           const prev = emitted.get(item.id) ?? 0
           const events: SessionEvent[] = []
           if (item.text.length > prev) {
@@ -195,7 +195,7 @@ class CodexSession implements ProviderSession {
                   type: 'tool.output',
                   localId,
                   turnId,
-                  toolUseId: item.id,
+                  toolUseId: `${turnId}:${item.id}`,
                   output: {
                     exit_code: item.exit_code,
                     output: item.aggregated_output?.slice(0, 4000)
@@ -208,7 +208,7 @@ class CodexSession implements ProviderSession {
                   type: 'tool.started',
                   localId,
                   turnId,
-                  toolUseId: item.id,
+                  toolUseId: `${turnId}:${item.id}`,
                   toolName: 'shell',
                   input: { command: item.command }
                 }
@@ -220,7 +220,7 @@ class CodexSession implements ProviderSession {
                   type: 'tool.output',
                   localId,
                   turnId,
-                  toolUseId: item.id,
+                  toolUseId: `${turnId}:${item.id}`,
                   output: item.error ?? item.result,
                   isError: item.status === 'failed'
                 }
@@ -230,7 +230,7 @@ class CodexSession implements ProviderSession {
                   type: 'tool.started',
                   localId,
                   turnId,
-                  toolUseId: item.id,
+                  toolUseId: `${turnId}:${item.id}`,
                   toolName: `${item.server}.${item.tool}`,
                   input: item.arguments
                 }
@@ -242,7 +242,7 @@ class CodexSession implements ProviderSession {
                   type: 'tool.output',
                   localId,
                   turnId,
-                  toolUseId: item.id,
+                  toolUseId: `${turnId}:${item.id}`,
                   output: { status: item.status, changes: item.changes },
                   isError: item.status === 'failed'
                 }
@@ -252,7 +252,7 @@ class CodexSession implements ProviderSession {
                   type: 'tool.started',
                   localId,
                   turnId,
-                  toolUseId: item.id,
+                  toolUseId: `${turnId}:${item.id}`,
                   toolName: 'apply_patch',
                   input: { changes: item.changes }
                 }
@@ -264,7 +264,7 @@ class CodexSession implements ProviderSession {
                   type: 'tool.output',
                   localId,
                   turnId,
-                  toolUseId: item.id,
+                  toolUseId: `${turnId}:${item.id}`,
                   output: 'done',
                   isError: false
                 }
@@ -274,7 +274,7 @@ class CodexSession implements ProviderSession {
                   type: 'tool.started',
                   localId,
                   turnId,
-                  toolUseId: item.id,
+                  toolUseId: `${turnId}:${item.id}`,
                   toolName: 'web_search',
                   input: { query: item.query }
                 }

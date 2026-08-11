@@ -124,8 +124,16 @@ interface ChatState {
 
 let initialized = false
 
+/** Index of the LAST block with this id — repeated ids must bind newest-first. */
+function lastIndexById(blocks: Block[], id: string): number {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (blocks[i].id === id) return i
+  }
+  return -1
+}
+
 function updateBlocks(blocks: Block[], id: string, update: (b: Block) => Block): Block[] {
-  const idx = blocks.findIndex((b) => b.id === id)
+  const idx = lastIndexById(blocks, id)
   if (idx === -1) return blocks
   const next = blocks.slice()
   next[idx] = update(next[idx])
@@ -466,7 +474,7 @@ export const useChat = create<ChatState>((set, get) => ({
       case 'text.delta':
       case 'thinking.delta': {
         const kind = ev.type === 'text.delta' ? 'assistant' : 'thinking'
-        const existing = blocks.find((b) => b.id === ev.blockId)
+        const existing = blocks[lastIndexById(blocks, ev.blockId)]
         if (existing) {
           setBlocks(
             updateBlocks(blocks, ev.blockId, (b) =>
@@ -487,7 +495,7 @@ export const useChat = create<ChatState>((set, get) => ({
       case 'text.done':
       case 'thinking.done': {
         const kind = ev.type === 'text.done' ? 'assistant' : 'thinking'
-        const existing = blocks.find((b) => b.id === ev.blockId)
+        const existing = blocks[lastIndexById(blocks, ev.blockId)]
         if (existing) {
           setBlocks(
             updateBlocks(blocks, ev.blockId, (b) =>

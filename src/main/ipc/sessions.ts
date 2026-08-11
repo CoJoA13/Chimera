@@ -34,7 +34,8 @@ import {
   recordTranscriptEvent,
   loadTranscript,
   loadTranscriptSince,
-  latestSeq
+  latestSeq,
+  dedupeReplayIds
 } from '../store/transcript'
 import type { UserInput } from '../providers/types'
 import { BusCore, BUS_INSTRUCTIONS, formatBusPrompt, type BusMessage } from '../bus/BusCore'
@@ -747,7 +748,7 @@ export class SessionManager {
   /** Replay stored history: transcript cache first, Claude SDK store as legacy fallback. */
   async history(conversationId: string): Promise<SessionEvent[]> {
     const cached = loadTranscript(conversationId)
-    if (cached.length > 0) return cached
+    if (cached.length > 0) return dedupeReplayIds(cached)
     const conversation = getConversation(conversationId)
     if (!conversation?.providerSessionId || conversation.provider !== 'claude') return []
     try {

@@ -32,6 +32,53 @@ export function loadTranscript(conversationId: string): SessionEvent[] {
   return rows.map((r) => JSON.parse(r.event_json) as SessionEvent)
 }
 
+/**
+ * Legacy cached Codex events reused item ids across turns, which made replays
+ * merge distinct messages and orphan tool outputs. Rewrite repeats to unique
+ * ids (later occurrences suffixed), bind outputs to the LATEST variant of
+ * their tool id, and close out calls that never recorded a result.
+ */
+export function dedupeReplayIds(events: SessionEvent[]): SessionEvent[] {
+  const counts = new Map<string, number>()
+  const currentTool = new Map<string, string>()
+  const openTools = new Map<string, SessionEvent>()
+  const result: SessionEvent[] = events.map((ev) => {
+    if (ev.type === 'text.done' || ev.type === 'thinking.done') {
+      const n = (counts.get(ev.blockId) ?? 0) + 1
+      counts.set(ev.blockId, n)
+      return n === 1 ? ev : { ...ev, blockId: `${ev.blockId}#${n}` }
+    }
+    if (ev.type === 'tool.started') {
+      const n = (counts.get(ev.toolUseId) ?? 0) + 1
+      counts.set(ev.toolUseId, n)
+      const id = n === 1 ? ev.toolUseId : `${ev.toolUseId}#${n}`
+      currentTool.set(ev.toolUseId, id)
+      const out = n === 1 ? ev : { ...ev, toolUseId: id }
+      openTools.set(id, out)
+      return out
+    }
+    if (ev.type === 'tool.output') {
+      const id = currentTool.get(ev.toolUseId) ?? ev.toolUseId
+      openTools.delete(id)
+      return id === ev.toolUseId ? ev : { ...ev, toolUseId: id }
+    }
+    return ev
+  })
+  // Calls with no recorded result would spin forever in the UI.
+  for (const [id, started] of openTools) {
+    if (started.type !== 'tool.started') continue
+    result.push({
+      type: 'tool.output',
+      localId: started.localId,
+      turnId: started.turnId,
+      toolUseId: id,
+      output: '(no result recorded — the call did not complete)',
+      isError: true
+    })
+  }
+  return result
+}
+
 export function clearTranscript(conversationId: string): void {
   getDb().prepare('DELETE FROM transcript_cache WHERE conversation_id = ?').run(conversationId)
 }

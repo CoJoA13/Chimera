@@ -403,3 +403,30 @@ describe('templates', () => {
     expect(loaded.spec.members.map((m) => m.title)).toEqual(['A', 'B'])
   })
 })
+
+describe('replay id dedupe (codex per-turn item ids)', () => {
+  it('uniquifies repeated ids, rebinds outputs, closes dangling tools', async () => {
+    const { dedupeReplayIds } = await import('../src/main/store/transcript')
+    const mk = (type: string, extra: Record<string, unknown>) =>
+      ({ type, localId: 'c', turnId: 't', ...extra }) as never
+    const events = [
+      mk('text.done', { blockId: 'codex:item_1', text: 'turn one' }),
+      mk('tool.started', { toolUseId: 'item_2', toolName: 'shell', input: {} }),
+      mk('tool.output', { toolUseId: 'item_2', output: 'ok', isError: false }),
+      // next turn reuses the same item ids
+      mk('text.done', { blockId: 'codex:item_1', text: 'turn two' }),
+      mk('tool.started', { toolUseId: 'item_2', toolName: 'shell', input: {} }),
+      // ...and this second call never completed
+    ]
+    const out = dedupeReplayIds(events) as { type: string; blockId?: string; toolUseId?: string; output?: unknown }[]
+    const texts = out.filter((e) => e.type === 'text.done')
+    expect(new Set(texts.map((e) => e.blockId)).size).toBe(2) // both messages survive
+    const starts = out.filter((e) => e.type === 'tool.started')
+    expect(new Set(starts.map((e) => e.toolUseId)).size).toBe(2)
+    // first output bound to first call; dangling second call closed synthetically
+    const outputs = out.filter((e) => e.type === 'tool.output')
+    expect(outputs).toHaveLength(2)
+    expect(outputs[1].toolUseId).toBe(starts[1].toolUseId)
+    expect(String(outputs[1].output)).toContain('did not complete')
+  })
+})
