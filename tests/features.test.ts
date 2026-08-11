@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { readMemory, saveMemory, deleteMemory } from '../src/main/store/memory'
 import { recordSpend, todaySpend, spendByConversation } from '../src/main/store/spend'
@@ -14,7 +14,7 @@ import {
   removeWatchersFor
 } from '../src/main/store/watchers'
 import { resolveCodexExecutionPolicy } from '../src/main/providers/codex/CodexProvider'
-import { applyMigrations } from '../src/main/store/db'
+import { applyMigrations, getDb } from '../src/main/store/db'
 import {
   addAlwaysAllowRule,
   isAlwaysAllowed,
@@ -22,7 +22,14 @@ import {
   listRules
 } from '../src/main/store/permissions'
 import { groupMessageMentions } from '../src/main/ipc/sessions'
-import { decodeWireBody, validateWireMessage } from '../src/main/federation'
+import { decodeWireBody, FederationManager, validateWireMessage } from '../src/main/federation'
+import { WatcherManager } from '../src/main/watcherManager'
+import {
+  clearTranscript,
+  loadTranscript,
+  recordTranscriptEvent,
+  searchTranscripts
+} from '../src/main/store/transcript'
 
 const CODEX_OPTS = {
   model: 'gpt-5.4',
@@ -194,6 +201,165 @@ describe('watchers store', () => {
     removeWatchersFor('watch-conv')
     expect(listWatchers().some((x) => x.conversationId === 'watch-conv')).toBe(false)
   })
+
+  it('does not consume a git commit while the target conversation is busy', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { execFileSync } = await import('node:child_process')
+    const repo = mkdtempSync(join(tmpdir(), 'chimera-watcher-retry-'))
+    const git = (...args: string[]): string =>
+      execFileSync('git', ['-C', repo, ...args], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'test',
+          GIT_AUTHOR_EMAIL: 'test@example.com',
+          GIT_COMMITTER_NAME: 'test',
+          GIT_COMMITTER_EMAIL: 'test@example.com'
+        }
+      }).trim()
+    try {
+      git('init', '-b', 'main')
+      writeFileSync(join(repo, 'tracked.txt'), 'one')
+      git('add', '.')
+      git('commit', '-m', 'one')
+      const conversation = createConversation('claude', 'claude-sonnet-5', {
+        title: 'Watcher retry target'
+      })
+      const watcher = addWatcher(conversation.id, repo, 'git', 'review it')
+      let busy = false
+      let sends = 0
+      const manager = new WatcherManager({
+        isBusy: () => busy,
+        startForConversation: async () => ({ localId: conversation.id, resumed: false }),
+        send: async () => {
+          sends++
+        },
+        groupSend: async () => {}
+      } as never)
+      await manager.pollGit() // establish baseline
+      const baseline = listWatchers().find((item) => item.id === watcher.id)!.lastState
+      writeFileSync(join(repo, 'tracked.txt'), 'two')
+      git('add', '.')
+      git('commit', '-m', 'two')
+      const newHead = git('rev-parse', 'HEAD')
+
+      busy = true
+      await manager.pollGit()
+      expect(listWatchers().find((item) => item.id === watcher.id)!.lastState).toBe(baseline)
+      expect(sends).toBe(0)
+
+      busy = false
+      await manager.pollGit()
+      expect(listWatchers().find((item) => item.id === watcher.id)!.lastState).toBe(newHead)
+      expect(sends).toBe(1)
+      removeWatchersFor(conversation.id)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
+  it('does not deliver the same git commit from overlapping polls', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { execFileSync } = await import('node:child_process')
+    const repo = mkdtempSync(join(tmpdir(), 'chimera-watcher-overlap-'))
+    const git = (...args: string[]): string =>
+      execFileSync('git', ['-C', repo, ...args], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'test',
+          GIT_AUTHOR_EMAIL: 'test@example.com',
+          GIT_COMMITTER_NAME: 'test',
+          GIT_COMMITTER_EMAIL: 'test@example.com'
+        }
+      }).trim()
+    const conversation = createConversation('claude', 'claude-sonnet-5', {
+      title: 'Watcher overlap target'
+    })
+    try {
+      git('init', '-b', 'main')
+      writeFileSync(join(repo, 'tracked.txt'), 'one')
+      git('add', '.')
+      git('commit', '-m', 'one')
+      addWatcher(conversation.id, repo, 'git', 'review it')
+      let releaseSend!: () => void
+      const sendBlocked = new Promise<void>((resolve) => (releaseSend = resolve))
+      let enteredSend!: () => void
+      const sendEntered = new Promise<void>((resolve) => (enteredSend = resolve))
+      let sends = 0
+      const manager = new WatcherManager({
+        isBusy: () => false,
+        startForConversation: async () => ({ localId: conversation.id, resumed: false }),
+        send: async () => {
+          sends++
+          enteredSend()
+          await sendBlocked
+        },
+        groupSend: async () => {}
+      } as never)
+      await manager.pollGit()
+      writeFileSync(join(repo, 'tracked.txt'), 'two')
+      git('add', '.')
+      git('commit', '-m', 'two')
+
+      const first = manager.pollGit()
+      await sendEntered
+      const second = manager.pollGit()
+      releaseSend()
+      await Promise.all([first, second])
+      expect(sends).toBe(1)
+    } finally {
+      removeWatchersFor(conversation.id)
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
+  it('retries a busy file trigger but does not retry a permanent send failure', async () => {
+    vi.useFakeTimers()
+    const conversation = createConversation('claude', 'claude-sonnet-5', {
+      title: 'File retry target'
+    })
+    const watcher = addWatcher(conversation.id, '/tmp', 'files', 'review it')
+    let busy = true
+    let fail = false
+    let sends = 0
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const manager = new WatcherManager({
+      isBusy: () => busy,
+      startForConversation: async () => ({ localId: conversation.id, resumed: false }),
+      send: async () => {
+        sends++
+        if (fail) throw new Error('permanent failure')
+      },
+      groupSend: async () => {}
+    } as never)
+    const queue = manager as unknown as {
+      queueFileFire: (watcherId: string, filename: string) => void
+    }
+    try {
+      queue.queueFileFire(watcher.id, 'one.txt')
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(sends).toBe(0)
+      busy = false
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(sends).toBe(1)
+
+      fail = true
+      queue.queueFileFire(watcher.id, 'two.txt')
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(sends).toBe(2)
+      await vi.advanceTimersByTimeAsync(30 * 60_000)
+      expect(sends).toBe(2)
+    } finally {
+      removeWatchersFor(conversation.id)
+      errorSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('agent-managed schedules', () => {
@@ -303,6 +469,159 @@ describe('federation bus injection', () => {
     const bytes = Buffer.from('A🙂B')
     const chunks = [bytes.subarray(0, 3), bytes.subarray(3, 5), bytes.subarray(5)]
     expect(decodeWireBody(chunks, bytes.length)).toBe('A🙂B')
+  })
+
+  it('removes proxies no longer advertised by a reachable peer', async () => {
+    const core = new BusCore()
+    const federation = new FederationManager(core)
+    const peerId = `peer-${Date.now()}`
+    getDb()
+      .prepare('INSERT INTO fed_peers (id, name, url, added_at) VALUES (?, ?, ?, ?)')
+      .run(peerId, 'Test peer', 'http://127.0.0.1:1/fed/token', Date.now())
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            { id: 'one', title: 'One', provider: 'claude' },
+            { id: 'two', title: 'Two', provider: 'codex' }
+          ]),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      await federation.syncPeers()
+      expect(core.listSessions('').map((session) => session.localId)).toEqual(
+        expect.arrayContaining([`fed:${peerId}:one`, `fed:${peerId}:two`])
+      )
+
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: 'one', title: 'One', provider: 'claude' }]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      )
+      await federation.syncPeers()
+      const ids = core.listSessions('').map((session) => session.localId)
+      expect(ids).toContain(`fed:${peerId}:one`)
+      expect(ids).not.toContain(`fed:${peerId}:two`)
+    } finally {
+      fetchMock.mockRestore()
+      getDb().prepare('DELETE FROM fed_peers WHERE id = ?').run(peerId)
+    }
+  })
+
+  it('keeps a recent inbound sender routable across session discovery sync', async () => {
+    const core = new BusCore()
+    const federation = new FederationManager(core)
+    const peerId = `peer-inbound-${Date.now()}`
+    const peer = {
+      id: peerId,
+      name: 'Inbound peer',
+      url: 'http://127.0.0.1:1/fed/token'
+    }
+    getDb()
+      .prepare('INSERT INTO fed_peers (id, name, url, added_at) VALUES (?, ?, ?, ?)')
+      .run(peer.id, peer.name, peer.url, Date.now())
+    core.register(
+      'local-target',
+      () => ({
+        localId: 'local-target',
+        conversationId: 'local-target',
+        title: 'Local target',
+        provider: 'claude',
+        status: 'idle'
+      }),
+      () => {}
+    )
+    const wire = {
+      messageId: 'remote-message',
+      targetId: 'local-target',
+      fromId: 'remote-sender',
+      fromTitle: 'Remote sender',
+      text: 'hello',
+      expectsReply: false
+    }
+    const register = federation as unknown as {
+      registerInboundSender: (p: typeof peer, message: typeof wire) => string
+    }
+    const senderProxy = register.registerInboundSender(peer, wire)
+    core.injectExternal({
+      messageId: 'fedmsg:test:remote-message',
+      from: senderProxy,
+      to: 'local-target',
+      text: 'hello',
+      expectsReply: false
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      fetchMock
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'content-type': 'application/json' }
+          })
+        )
+        .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      await federation.syncPeers()
+      expect(core.listSessions('').map((session) => session.localId)).toContain(senderProxy)
+      core.reply('local-target', 'fedmsg:test:remote-message', 'answer')
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+      expect(fetchMock.mock.calls[1][0]).toBe(`${peer.url}/deliver`)
+    } finally {
+      fetchMock.mockRestore()
+      getDb().prepare('DELETE FROM fed_peers WHERE id = ?').run(peerId)
+    }
+  })
+})
+
+describe('transcript resilience and search', () => {
+  it('skips a malformed cache row instead of breaking conversation history', () => {
+    const conversation = createConversation('claude', 'claude-sonnet-5')
+    recordTranscriptEvent(conversation.id, {
+      type: 'user.message',
+      localId: conversation.id,
+      turnId: 'one',
+      text: 'valid message'
+    })
+    getDb()
+      .prepare('INSERT INTO transcript_cache (conversation_id, event_json) VALUES (?, ?)')
+      .run(conversation.id, '{not valid json')
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(loadTranscript(conversation.id)).toHaveLength(1)
+    expect(warning).toHaveBeenCalledTimes(1)
+    warning.mockRestore()
+    clearTranscript(conversation.id)
+  })
+
+  it('finds message text even when newer tool JSON contains the same query', () => {
+    const conversation = createConversation('claude', 'claude-sonnet-5', {
+      title: 'Search target'
+    })
+    const needle = `needle-${Date.now()}`
+    recordTranscriptEvent(conversation.id, {
+      type: 'user.message',
+      localId: conversation.id,
+      turnId: 'one',
+      text: `Find the ${needle} here`
+    })
+    const insert = getDb().prepare(
+      'INSERT INTO transcript_cache (conversation_id, event_json) VALUES (?, ?)'
+    )
+    for (let index = 0; index < 510; index++) {
+      insert.run(
+        conversation.id,
+        JSON.stringify({
+          type: 'tool.output',
+          localId: conversation.id,
+          turnId: 'noise',
+          toolUseId: `tool-${index}`,
+          output: needle,
+          isError: false
+        })
+      )
+    }
+    expect(searchTranscripts(needle).map((hit) => hit.conversationId)).toContain(conversation.id)
+    clearTranscript(conversation.id)
   })
 })
 
