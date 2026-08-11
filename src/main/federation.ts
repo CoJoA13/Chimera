@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { getDb } from './store/db'
 import { getSetting, setSetting } from './store/settings'
 import { logActivity } from './store/activity'
-import type { BusCore, BusMessage } from './bus/BusCore'
+import { BusTargetUnavailableError, type BusCore, type BusMessage } from './bus/BusCore'
 
 export interface FedPeer {
   id: string
@@ -350,8 +350,14 @@ export class FederationManager {
           })
           logActivity('federation', `Message from ${wire.fromTitle}`, wire.targetId)
           res.writeHead(200).end('{"ok":true}')
-        } catch {
-          res.writeHead(400).end()
+        } catch (err) {
+          if (err instanceof BusTargetUnavailableError) {
+            res
+              .writeHead(404, { 'content-type': 'application/json' })
+              .end(JSON.stringify({ ok: false, error: err.message }))
+          } else {
+            res.writeHead(400).end()
+          }
         }
       })
       return

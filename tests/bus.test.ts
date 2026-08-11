@@ -232,6 +232,20 @@ describe('BusCore', () => {
     ).toThrow(/duplicate message id/i)
   })
 
+  it('rejects federation delivery to a vanished target without consuming the message id', () => {
+    const external = {
+      messageId: 'fed-target-gone',
+      from: 'fed:peer:remote',
+      to: 'gone',
+      text: 'hello',
+      expectsReply: false
+    }
+    expect(() => core.injectExternal(external)).toThrow(/no longer available/)
+    const gone = makeSession(core, 'gone', 'Restored target')
+    expect(() => core.injectExternal(external)).not.toThrow()
+    expect(gone.delivered).toHaveLength(1)
+  })
+
   it('rejects a federated reply from the wrong peer', async () => {
     makeSession(core, 'a', 'A')
     makeSession(core, 'fed:peer-one', 'Peer one')

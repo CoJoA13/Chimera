@@ -23,6 +23,12 @@ export interface BusMessage {
   expectsReply: boolean
 }
 
+export class BusTargetUnavailableError extends Error {
+  constructor(targetId: string) {
+    super(`Bus target is no longer available: ${targetId}`)
+  }
+}
+
 interface Registered {
   info: () => BusSessionInfo
   /** Deliver a message to the session (inject or queue — transport's choice). */
@@ -205,18 +211,21 @@ export class BusCore {
    * it for reply correlation; resolves a matching await if it is a reply.
    */
   injectExternal(msg: BusMessage): void {
+    const awaiting = msg.inReplyTo ? this.awaiting.get(msg.inReplyTo) : undefined
     if (msg.inReplyTo) {
-      const candidate = this.awaiting.get(msg.inReplyTo)
-      if (candidate && candidate.targetLocalId !== msg.from) {
+      if (awaiting && awaiting.targetLocalId !== msg.from) {
         throw new Error('Federated reply sender does not match the awaited session')
       }
     }
+    if (!awaiting && !this.sessions.has(msg.to)) {
+      throw new BusTargetUnavailableError(msg.to)
+    }
     this.remember(msg)
     if (msg.inReplyTo) {
-      const awaiting = this.removeAwait(msg.inReplyTo)
-      if (awaiting) {
+      const pending = this.removeAwait(msg.inReplyTo)
+      if (pending) {
         this.onExchange?.(msg, 'replied')
-        awaiting.resolve({ status: 'replied', text: msg.text })
+        pending.resolve({ status: 'replied', text: msg.text })
         return
       }
     }
