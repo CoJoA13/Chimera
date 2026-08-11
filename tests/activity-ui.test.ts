@@ -3,6 +3,7 @@ import { IDLE_ACTIVITY, reduceAgentActivity } from '../src/shared/activity'
 import { stampSessionEvent } from '../src/shared/events'
 import { formatRelativeTime } from '../src/shared/time'
 import { useChat } from '../src/renderer/src/stores/chat'
+import { hookPluginNames, uniqueGitPlugins } from '../src/shared/plugins'
 
 const base = { localId: 'conversation-1', turnId: 'turn-1' }
 
@@ -75,5 +76,22 @@ describe('chat send lifecycle', () => {
     await useChat.getState().send('hello')
     expect(useChat.getState().activityByConv['conversation-1']).toEqual(IDLE_ACTIVITY)
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  })
+})
+
+describe('plugin bulk management', () => {
+  const plugins = [
+    { id: 'a', name: 'Safe', gitUrl: 'https://github.com/x/market.git' },
+    { id: 'b', name: 'Hooked', gitUrl: 'https://github.com/x/market.git' },
+    { id: 'c', name: 'Other', gitUrl: 'https://github.com/y/plugin.git' }
+  ]
+  it('names every hook-bearing plugin for confirmation', () => {
+    expect(hookPluginNames(plugins, {
+      a: { id: 'a', description: null, version: null, capabilities: { skills: 0, agents: 0, commands: 0, hooks: 0 }, hasHooks: false, health: 'ready', issue: null },
+      b: { id: 'b', description: null, version: null, capabilities: { skills: 0, agents: 0, commands: 0, hooks: 1 }, hasHooks: true, health: 'ready', issue: null }
+    })).toEqual(['Hooked'])
+  })
+  it('updates a marketplace repository only once', () => {
+    expect(uniqueGitPlugins(plugins).map((plugin) => plugin.id)).toEqual(['b', 'c'])
   })
 })

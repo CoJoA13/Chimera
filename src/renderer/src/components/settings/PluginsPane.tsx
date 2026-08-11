@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Puzzle, Trash2, FolderPlus, GitBranch, Loader2, RefreshCw, Check, Search, ShieldAlert } from 'lucide-react'
-import type { PluginInspection } from '../../../../shared/plugins'
+import { hookPluginNames, uniqueGitPlugins, type PluginInspection } from '../../../../shared/plugins'
 
 interface PluginRow {
   id: string
@@ -21,6 +21,7 @@ export function PluginsPane() {
   const [selected, setSelected] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkResult, setBulkResult] = useState<string | null>(null)
 
   const refresh = async (): Promise<void> => {
     const [nextPlugins, details] = await Promise.all([
@@ -79,7 +80,7 @@ export function PluginsPane() {
   }
 
   const confirmHooks = (targets: PluginRow[]): boolean => {
-    const names = targets.filter((plugin) => inspections[plugin.id]?.hasHooks).map((plugin) => plugin.name)
+    const names = hookPluginNames(targets, inspections)
     return names.length === 0 || window.confirm(`Enable plugins containing executable hooks?\n\n${names.join('\n')}\n\nHooks run with the agent's permissions.`)
   }
 
@@ -87,9 +88,21 @@ export function PluginsPane() {
     if (enabled && !confirmHooks(targets)) return
     setBulkBusy(true)
     setError(null)
+    setBulkResult(null)
+    const failures: string[] = []
+    let succeeded = 0
     try {
-      for (const plugin of targets) await window.chimera.setPluginEnabled(plugin.id, enabled)
+      for (const plugin of targets) {
+        try {
+          await window.chimera.setPluginEnabled(plugin.id, enabled)
+          succeeded++
+        } catch (err) {
+          failures.push(`${plugin.name}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
       await refresh()
+      setBulkResult(`${succeeded} ${enabled ? 'enabled' : 'disabled'}${failures.length ? `; ${failures.length} failed` : ''}`)
+      if (failures.length) setError(failures.join(' · '))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -98,13 +111,24 @@ export function PluginsPane() {
   }
 
   const updateAll = async (): Promise<void> => {
-    const unique = [...new Map(plugins.filter((plugin) => plugin.gitUrl).map((plugin) => [plugin.gitUrl, plugin])).values()]
+    const unique = uniqueGitPlugins(plugins)
     setBulkBusy(true)
     setError(null)
+    setBulkResult(null)
+    const failures: string[] = []
+    let succeeded = 0
     try {
-      for (const plugin of unique) await window.chimera.updatePlugin(plugin.id)
-      setUpdated('all')
+      for (const plugin of unique) {
+        try {
+          await window.chimera.updatePlugin(plugin.id)
+          succeeded++
+        } catch (err) {
+          failures.push(`${plugin.name}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
       await refresh()
+      setBulkResult(`${succeeded} repositories updated${failures.length ? `; ${failures.length} failed` : ''}`)
+      if (failures.length) setError(failures.join(' · '))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -118,7 +142,7 @@ export function PluginsPane() {
     const detail = inspections[plugin.id]
     return [plugin.name, plugin.path, plugin.gitUrl, detail?.description].some((value) => value?.toLowerCase().includes(query))
   })
-  const selectedPlugins = plugins.filter((plugin) => selected.includes(plugin.id))
+  const selectedPlugins = visible.filter((plugin) => selected.includes(plugin.id))
 
   return (
     <div className="space-y-3">
@@ -155,6 +179,7 @@ export function PluginsPane() {
         </button>
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
+      {bulkResult && <p className="text-xs text-emerald-400">{bulkResult}</p>}
 
       {plugins.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#30363d] bg-[#10151c] p-2">
@@ -162,9 +187,9 @@ export function PluginsPane() {
             <Search size={13} className="absolute top-2 left-2 text-slate-500" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search plugins" className="w-full rounded border border-[#30363d] bg-[#0d1117] py-1.5 pr-2 pl-7 text-xs" />
           </div>
-          <span className="text-xs text-slate-500">{selected.length} selected</span>
-          <button disabled={selected.length === 0 || bulkBusy} onClick={() => void setEnabled(selectedPlugins, true)} className="rounded border border-[#30363d] px-2 py-1 text-xs text-slate-300 disabled:opacity-40">Enable</button>
-          <button disabled={selected.length === 0 || bulkBusy} onClick={() => void setEnabled(selectedPlugins, false)} className="rounded border border-[#30363d] px-2 py-1 text-xs text-slate-300 disabled:opacity-40">Disable</button>
+          <span className="text-xs text-slate-500">{selectedPlugins.length} selected in view</span>
+          <button disabled={selectedPlugins.length === 0 || bulkBusy} onClick={() => void setEnabled(selectedPlugins, true)} className="rounded border border-[#30363d] px-2 py-1 text-xs text-slate-300 disabled:opacity-40">Enable</button>
+          <button disabled={selectedPlugins.length === 0 || bulkBusy} onClick={() => void setEnabled(selectedPlugins, false)} className="rounded border border-[#30363d] px-2 py-1 text-xs text-slate-300 disabled:opacity-40">Disable</button>
           <button disabled={!plugins.some((p) => p.gitUrl) || bulkBusy} onClick={() => void updateAll()} className="flex items-center gap-1 rounded border border-[#30363d] px-2 py-1 text-xs text-slate-300 disabled:opacity-40"><RefreshCw size={12} /> Update all</button>
         </div>
       )}
@@ -200,6 +225,7 @@ export function PluginsPane() {
                   {detail.health !== 'ready' && <span title={detail.issue ?? undefined} className="flex items-center gap-1 rounded bg-red-950/50 px-1.5 py-0.5 text-red-300"><ShieldAlert size={10} /> {detail.health}</span>}
                 </div>
               )}
+              {detail?.health !== 'ready' && <div className="mt-1 text-[11px] text-red-300">{detail?.issue}. Remove this entry or reinstall the plugin folder.</div>}
             </div>
             {p.gitUrl && (
               <button
