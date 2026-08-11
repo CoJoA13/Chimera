@@ -51,7 +51,7 @@ export type Block = (
       note: string
       verifier: string
     }
-) & { at?: number; turnId?: string; completedAt?: number }
+) & { at?: number; turnId?: string }
 
 export interface PendingPermission {
   requestId: string
@@ -367,7 +367,10 @@ export const useChat = create<ChatState>((set, get) => ({
         }))
       }
     } catch (err) {
-      set((st) => ({ statusByConv: { ...st.statusByConv, [activeConvId]: 'idle' } }))
+      set((st) => ({
+        statusByConv: { ...st.statusByConv, [activeConvId]: 'idle' },
+        activityByConv: { ...st.activityByConv, [activeConvId]: IDLE_ACTIVITY }
+      }))
       get().pushToast(err instanceof Error ? err.message : String(err))
     }
   },
@@ -570,8 +573,8 @@ export const useChat = create<ChatState>((set, get) => ({
             toolName: ev.toolName,
             input: ev.input,
             done: false,
-            memberName: ev.memberName
-            ,at: ev.at,
+            memberName: ev.memberName,
+            at: ev.at,
             turnId: ev.turnId
           }
         ])
@@ -580,7 +583,7 @@ export const useChat = create<ChatState>((set, get) => ({
       case 'tool.output':
         setBlocks(
           updateBlocks(blocks, ev.toolUseId, (b) =>
-            b.kind === 'tool' ? { ...b, output: ev.output, isError: ev.isError, done: true, completedAt: ev.at } : b
+            b.kind === 'tool' ? { ...b, output: ev.output, isError: ev.isError, done: true } : b
           )
         )
         break
@@ -608,8 +611,8 @@ export const useChat = create<ChatState>((set, get) => ({
             durationMs: ev.durationMs,
             isError: ev.isError,
             errorMessage: ev.errorMessage,
-            memberName: ev.memberName
-            ,at: ev.at,
+            memberName: ev.memberName,
+            at: ev.at,
             turnId: ev.turnId
           }
         ])
@@ -625,8 +628,8 @@ export const useChat = create<ChatState>((set, get) => ({
             peerLocalId: ev.direction === 'in' ? ev.from : ev.to,
             text: ev.text,
             isReply: ev.inReplyTo !== undefined,
-            memberName: ev.memberName
-            ,at: ev.at
+            memberName: ev.memberName,
+            at: ev.at
           }
         ])
         if (ev.direction === 'in' && convId !== s.activeConvId) {
@@ -642,8 +645,8 @@ export const useChat = create<ChatState>((set, get) => ({
             id: crypto.randomUUID(),
             verdict: ev.verdict,
             note: ev.note,
-            verifier: ev.verifier
-            ,at: ev.at,
+            verifier: ev.verifier,
+            at: ev.at,
             turnId: ev.turnId
           }
         ])

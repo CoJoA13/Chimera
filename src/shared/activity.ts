@@ -56,7 +56,7 @@ export function reduceAgentActivity(
     case 'turn.completed':
       return event.groupDone === false ? state : IDLE_ACTIVITY
     case 'session.error':
-      return { phase: 'error', since, detail: event.message, memberName }
+      return event.fatal ? { phase: 'error', since, detail: event.message, memberName } : state
     default:
       return state
   }

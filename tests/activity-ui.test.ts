@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { IDLE_ACTIVITY, reduceAgentActivity } from '../src/shared/activity'
 import { stampSessionEvent } from '../src/shared/events'
 import { formatRelativeTime } from '../src/shared/time'
+import { useChat } from '../src/renderer/src/stores/chat'
 
 const base = { localId: 'conversation-1', turnId: 'turn-1' }
 
@@ -41,5 +42,38 @@ describe('live agent activity', () => {
       orphanTool
     ]
     expect(replay.reduce((state, event) => reduceAgentActivity(state, event, 'replay'), IDLE_ACTIVITY)).toEqual(IDLE_ACTIVITY)
+  })
+
+  it('tracks permission waits, fatal errors, and concurrent group completion', () => {
+    let state = reduceAgentActivity(IDLE_ACTIVITY, { ...base, type: 'turn.started', at: 10 })
+    state = reduceAgentActivity(state, { type: 'permission.request', localId: base.localId, requestId: 'p', toolName: 'Bash', input: {}, at: 20 })
+    expect(state.phase).toBe('waiting_permission')
+    state = reduceAgentActivity(state, { type: 'permission.resolved', localId: base.localId, requestId: 'p', behavior: 'allow', at: 30 })
+    expect(state.phase).toBe('thinking')
+    state = reduceAgentActivity(state, { ...base, type: 'turn.completed', isError: false, groupDone: false, at: 40 })
+    expect(state.phase).toBe('thinking')
+    expect(reduceAgentActivity(state, { type: 'session.error', localId: base.localId, message: 'warning', fatal: false, at: 50 })).toEqual(state)
+    expect(reduceAgentActivity(state, { type: 'session.error', localId: base.localId, message: 'failed', fatal: true, at: 60 }).phase).toBe('error')
+  })
+})
+
+describe('chat send lifecycle', () => {
+  it('returns activity to idle when admission fails', async () => {
+    const previousWindow = globalThis.window
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { chimera: { sendMessage: async () => Promise.reject(new Error('budget reached')) } }
+    })
+    useChat.setState({
+      activeConvId: 'conversation-1',
+      sessionByConv: { 'conversation-1': 'conversation-1' },
+      statusByConv: { 'conversation-1': 'idle' },
+      activityByConv: {},
+      blocksByConv: {},
+      conversations: [{ id: 'conversation-1', kind: 'single', provider: 'claude' } as never]
+    })
+    await useChat.getState().send('hello')
+    expect(useChat.getState().activityByConv['conversation-1']).toEqual(IDLE_ACTIVITY)
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   })
 })
