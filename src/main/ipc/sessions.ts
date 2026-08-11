@@ -107,6 +107,7 @@ interface PendingPermission {
   resolve: (d: PermissionDecision) => void
   toolName: string
   conversationId: string
+  localId: string
   input: Record<string, unknown>
 }
 
@@ -645,6 +646,7 @@ export class SessionManager {
             resolve,
             toolName: permReq.toolName,
             conversationId,
+            localId: streamId,
             input: permReq.input
           })
           sender.push({
@@ -922,6 +924,12 @@ export class SessionManager {
     if (behavior === 'allow' && always) {
       addAlwaysAllowRule(pending.toolName, pending.conversationId, pending.input)
     }
+    this.sessions.get(pending.conversationId)?.sender.push({
+      type: 'permission.resolved',
+      localId: pending.localId,
+      requestId,
+      behavior
+    })
     pending.resolve(behavior === 'allow' ? { behavior: 'allow' } : { behavior: 'deny' })
   }
 
