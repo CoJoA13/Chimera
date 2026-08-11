@@ -225,7 +225,7 @@ export function PluginsPane() {
                   {detail.health !== 'ready' && <span title={detail.issue ?? undefined} className="flex items-center gap-1 rounded bg-red-950/50 px-1.5 py-0.5 text-red-300"><ShieldAlert size={10} /> {detail.health}</span>}
                 </div>
               )}
-              {detail?.health !== 'ready' && <div className="mt-1 text-[11px] text-red-300">{detail?.issue}. Remove this entry or reinstall the plugin folder.</div>}
+              {detail && detail.health !== 'ready' && <div className="mt-1 text-[11px] text-red-300">{detail.issue}. Remove this entry or reinstall the plugin folder.</div>}
             </div>
             {p.gitUrl && (
               <button

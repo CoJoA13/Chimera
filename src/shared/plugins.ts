@@ -23,7 +23,9 @@ export function hookPluginNames(
   plugins: PluginManagementRow[],
   inspections: Record<string, PluginInspection>
 ): string[] {
-  return plugins.filter((plugin) => inspections[plugin.id]?.hasHooks).map((plugin) => plugin.name)
+  return plugins
+    .filter((plugin) => inspections[plugin.id]?.hasHooks !== false)
+    .map((plugin) => plugin.name)
 }
 
 export function uniqueGitPlugins<T extends PluginManagementRow>(plugins: T[]): T[] {

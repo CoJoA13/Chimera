@@ -48,6 +48,10 @@ function countFiles(root: string, accept: (name: string) => boolean): number {
   return count
 }
 
+function hasDirectoryEntries(root: string): boolean {
+  return existsSync(root) && readdirSync(root, { withFileTypes: true }).length > 0
+}
+
 /** Slow filesystem inventory for Settings only; session startup keeps using listPlugins(). */
 export function inspectPlugins(): PluginInspection[] {
   return listPlugins().map((plugin) => {
@@ -67,7 +71,7 @@ export function inspectPlugins(): PluginInspection[] {
           commands: countFiles(join(plugin.path, 'commands'), (name) => name.endsWith('.md')),
           hooks
         },
-        hasHooks: hooks > 0,
+        hasHooks: hooks > 0 || hasDirectoryEntries(join(plugin.path, 'hooks')),
         health: 'ready',
         issue: null
       }

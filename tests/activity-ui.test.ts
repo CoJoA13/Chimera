@@ -89,7 +89,7 @@ describe('plugin bulk management', () => {
     expect(hookPluginNames(plugins, {
       a: { id: 'a', description: null, version: null, capabilities: { skills: 0, agents: 0, commands: 0, hooks: 0 }, hasHooks: false, health: 'ready', issue: null },
       b: { id: 'b', description: null, version: null, capabilities: { skills: 0, agents: 0, commands: 0, hooks: 1 }, hasHooks: true, health: 'ready', issue: null }
-    })).toEqual(['Hooked'])
+    })).toEqual(['Hooked', 'Other'])
   })
   it('updates a marketplace repository only once', () => {
     expect(uniqueGitPlugins(plugins).map((plugin) => plugin.id)).toEqual(['b', 'c'])
