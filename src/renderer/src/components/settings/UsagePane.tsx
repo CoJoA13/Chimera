@@ -95,7 +95,7 @@ export function UsagePane() {
           >
             <span className="min-w-0 flex-1 truncate text-slate-300">{row.title}</span>
             <span className="font-mono text-slate-400" title={`Reported/legacy $${row.reportedCost.toFixed(3)}; estimated $${row.estimatedCost.toFixed(3)}`}>
-              {row.estimatedCost > 0 && row.reportedCost === 0 ? '~' : ''}${row.total.toFixed(3)}
+              {row.estimatedCost > 0 ? '~' : ''}${row.total.toFixed(3)}
             </span>
           </div>
         ))}
