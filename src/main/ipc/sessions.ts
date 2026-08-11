@@ -587,7 +587,7 @@ export class SessionManager {
           // consume the admission estimate so their turns cannot bypass the
           // daily budget entirely.
           if (ev.costUsd) recordSpend(conversationId, ev.costUsd)
-          else if (estimatedUsd > 0) recordSpend(conversationId, estimatedUsd)
+          else if (estimatedUsd > 0) recordSpend(conversationId, estimatedUsd, 'estimated')
           // Auto-verification: check the answer with the OTHER provider, async.
           const live2 = this.sessions.get(localId)
           const answer = live2?.lastAnswer

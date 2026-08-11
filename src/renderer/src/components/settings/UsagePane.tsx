@@ -2,9 +2,15 @@ import { useEffect, useState } from 'react'
 import { Wallet } from 'lucide-react'
 
 interface Summary {
-  todayUsd: number
+  today: { reportedCost: number; estimatedCost: number; total: number }
   budgetUsd: number | null
-  byConversation: { conversationId: string; title: string; cost: number }[]
+  byConversation: {
+    conversationId: string
+    title: string
+    reportedCost: number
+    estimatedCost: number
+    total: number
+  }[]
 }
 
 export function UsagePane() {
@@ -29,7 +35,7 @@ export function UsagePane() {
   }
 
   if (!summary) return null
-  const overBudget = summary.budgetUsd !== null && summary.todayUsd >= summary.budgetUsd
+  const overBudget = summary.budgetUsd !== null && summary.today.total >= summary.budgetUsd
 
   return (
     <div className="space-y-4">
@@ -37,9 +43,9 @@ export function UsagePane() {
         <div className="flex items-center gap-2">
           <Wallet size={16} className={overBudget ? 'text-red-400' : 'text-emerald-400'} />
           <span className="text-2xl font-semibold text-slate-100">
-            ${summary.todayUsd.toFixed(2)}
+            ${summary.today.total.toFixed(2)}
           </span>
-          <span className="text-sm text-slate-500">spent today (API-metered turns)</span>
+          <span className="text-sm text-slate-500">tracked usage today</span>
         </div>
         <div className="mt-3 flex items-center gap-2 text-sm">
           <span className="text-slate-400">Daily budget:</span>
@@ -57,12 +63,13 @@ export function UsagePane() {
             Save
           </button>
           {overBudget && (
-            <span className="text-xs text-red-400">Budget reached — sends are blocked today.</span>
+            <span className="text-xs text-red-400">Budget threshold reached — new sends are blocked.</span>
           )}
         </div>
         <p className="mt-2 text-xs text-slate-600">
-          Subscription-metered turns (ChatGPT login) report $0; the budget gates API-billed usage.
-          Clear the field to remove the cap.
+          Reported or legacy usage: ${summary.today.reportedCost.toFixed(2)}. New admission estimates: $
+          {summary.today.estimatedCost.toFixed(2)}. The budget is a soft guard: admitted turns reserve
+          an estimate and may settle slightly above the threshold. Clear the field to remove it.
         </p>
         <button
           onClick={() =>
@@ -79,7 +86,7 @@ export function UsagePane() {
       <div>
         <p className="mb-1.5 text-sm font-medium text-slate-300">Last 7 days by conversation</p>
         {summary.byConversation.length === 0 && (
-          <p className="text-sm text-slate-500">No metered spend recorded yet.</p>
+          <p className="text-sm text-slate-500">No tracked usage recorded yet.</p>
         )}
         {summary.byConversation.map((row) => (
           <div
@@ -87,7 +94,9 @@ export function UsagePane() {
             className="flex items-center gap-2 border-b border-[#161b22] py-1.5 text-sm"
           >
             <span className="min-w-0 flex-1 truncate text-slate-300">{row.title}</span>
-            <span className="font-mono text-slate-400">${row.cost.toFixed(3)}</span>
+            <span className="font-mono text-slate-400" title={`Reported/legacy $${row.reportedCost.toFixed(3)}; estimated $${row.estimatedCost.toFixed(3)}`}>
+              {row.estimatedCost > 0 && row.reportedCost === 0 ? '~' : ''}${row.total.toFixed(3)}
+            </span>
           </div>
         ))}
       </div>

@@ -49,7 +49,7 @@ import {
   removeSchedule,
   removeSchedulesFor
 } from '../store/schedules'
-import { todaySpend, spendByConversation } from '../store/spend'
+import { todaySpendBreakdown, spendByConversation } from '../store/spend'
 import { getSetting, setSetting } from '../store/settings'
 import { readMemory, deleteMemory } from '../store/memory'
 import { getConversation, setAutoVerify } from '../store/conversations'
@@ -360,7 +360,6 @@ export function registerIpc(
       .parse(payload)
     manager.respondPermission(resp.requestId, resp.behavior, resp.always)
   })
-
   // mcp
   ipcMain.handle(IPC.mcpList, () => listMcpServers())
   ipcMain.handle(IPC.mcpAdd, (_e, payload: unknown) => {
@@ -505,7 +504,7 @@ export function registerIpc(
       title: getConversation(row.conversationId)?.title ?? 'deleted conversation'
     }))
     return {
-      todayUsd: todaySpend(),
+      today: todaySpendBreakdown(),
       budgetUsd: getSetting<number | null>('dailyBudgetUsd', null),
       byConversation
     }

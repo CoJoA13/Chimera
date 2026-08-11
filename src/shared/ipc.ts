@@ -169,9 +169,15 @@ export interface ChimeraApi {
 
   // usage / budget
   usageSummary(): Promise<{
-    todayUsd: number
+    today: { reportedCost: number; estimatedCost: number; total: number }
     budgetUsd: number | null
-    byConversation: { conversationId: string; title: string; cost: number }[]
+    byConversation: {
+      conversationId: string
+      title: string
+      reportedCost: number
+      estimatedCost: number
+      total: number
+    }[]
   }>
   setDailyBudget(budgetUsd: number | null): Promise<void>
 

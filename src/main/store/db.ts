@@ -155,6 +155,9 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE permission_rules ADD COLUMN input_pattern TEXT;
   DELETE FROM permission_rules WHERE input_pattern IS NULL;
+  `,
+  `
+  ALTER TABLE spend ADD COLUMN estimated_cost REAL NOT NULL DEFAULT 0;
   `
 ]
 
