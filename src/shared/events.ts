@@ -18,7 +18,12 @@ export interface MemberTag {
   memberName?: string
 }
 
-export type SessionEvent =
+export interface EventMeta {
+  /** Main-process arrival time in Unix milliseconds. Legacy transcript rows omit it. */
+  at?: number
+}
+
+export type SessionEvent = (
   | ({ type: 'turn.started'; localId: string; turnId: string } & MemberTag)
   /** User input replayed from stored history (live user input is rendered locally). */
   | { type: 'user.message'; localId: string; turnId: string; text: string }
@@ -92,3 +97,9 @@ export type SessionEvent =
       note: string
       verifier: string
     }
+) & EventMeta
+
+/** Stamp once at main-process ingress; preserve provider supplied/replayed timestamps. */
+export function stampSessionEvent<T extends SessionEvent>(event: T, now = Date.now()): T {
+  return (event.at === undefined ? { ...event, at: now } : event) as T
+}

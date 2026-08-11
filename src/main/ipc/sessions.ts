@@ -2,7 +2,7 @@ import { BrowserWindow, Notification } from 'electron'
 import type { WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { getSessionMessages } from '@anthropic-ai/claude-agent-sdk'
-import type { SessionEvent } from '../../shared/events'
+import { stampSessionEvent, type SessionEvent } from '../../shared/events'
 import type { PermissionDecision, ProviderSession, McpServerRuntimeConfig } from '../providers/types'
 import { getProvider } from '../providers/registry'
 import { normalizeStoredHistory } from '../providers/claude/normalize'
@@ -58,6 +58,7 @@ class EventSender {
   ) {}
 
   push(ev: SessionEvent): void {
+    ev = stampSessionEvent(ev)
     if (ev.type === 'text.delta' || ev.type === 'thinking.delta') {
       const key = `${ev.type}:${ev.blockId}`
       const existing = this.buffers.get(key)
@@ -686,7 +687,7 @@ export class SessionManager {
    * Group chat send: resolve @-mention targets, build each member's room
    * update (messages since they last responded), and fan out.
    */
-  async groupSend(groupId: string, text: string): Promise<void> {
+  async groupSend(groupId: string, text: string): Promise<number> {
     const group = getConversation(groupId)
     if (!group || group.kind !== 'group') throw new Error(`Not a group conversation: ${groupId}`)
     const members = listGroupMembers(groupId)
@@ -719,7 +720,8 @@ export class SessionManager {
     }
 
     touchConversation(groupId)
-    recordTranscriptEvent(groupId, { type: 'user.message', localId: groupId, turnId: 'live', text })
+    const at = Date.now()
+    recordTranscriptEvent(groupId, { type: 'user.message', localId: groupId, turnId: 'live', text, at })
     const cursor = latestSeq(groupId)
 
     for (const member of targets) {
@@ -738,6 +740,7 @@ export class SessionManager {
         setMemberLastSeq(member.id, cursor)
       }
     }
+    return at
   }
 
   async groupInterrupt(groupId: string): Promise<void> {
@@ -847,7 +850,7 @@ export class SessionManager {
     return this.get(localId)
   }
 
-  async send(localId: string, text: string, attachments?: UserInput['attachments']): Promise<void> {
+  async send(localId: string, text: string, attachments?: UserInput['attachments']): Promise<number> {
     const live = await this.ensureLive(localId)
     touchConversation(live.conversationId)
     // First message in an untitled chat: generate a proper title in the background.
@@ -864,13 +867,16 @@ export class SessionManager {
       attachments && attachments.length > 0
         ? `${text}\n[attached: ${attachments.map((a) => a.path.split('/').pop()).join(', ')}]`
         : text
+    const at = Date.now()
     recordTranscriptEvent(live.conversationId, {
       type: 'user.message',
       localId,
       turnId: 'live',
-      text: label
+      text: label,
+      at
     })
     await this.dispatchProviderTurn(live, { text, attachments })
+    return at
   }
 
   async interrupt(localId: string): Promise<void> {

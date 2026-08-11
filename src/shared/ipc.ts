@@ -75,7 +75,7 @@ export interface ChimeraApi {
   ): Promise<void>
   setWatcherEnabled(id: string, enabled: boolean): Promise<void>
   removeWatcher(id: string): Promise<void>
-  groupSend(groupId: string, text: string): Promise<void>
+  groupSend(groupId: string, text: string): Promise<number>
   groupInterrupt(groupId: string): Promise<void>
   renameConversation(id: string, title: string): Promise<void>
   deleteConversation(id: string): Promise<void>
@@ -92,7 +92,7 @@ export interface ChimeraApi {
     localId: string,
     text: string,
     attachments?: { path: string; mimeType: string }[]
-  ): Promise<void>
+  ): Promise<number>
   pickFiles(): Promise<{ path: string; mimeType: string }[]>
   pickFolder(): Promise<string | null>
   setConversationCwd(conversationId: string, cwd: string): Promise<void>

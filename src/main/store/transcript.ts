@@ -1,5 +1,5 @@
 import { getDb } from './db'
-import type { SessionEvent } from '../../shared/events'
+import { stampSessionEvent, type SessionEvent } from '../../shared/events'
 
 /**
  * App-side transcript cache: the renderable subset of session events, per
@@ -22,7 +22,7 @@ export function recordTranscriptEvent(conversationId: string, ev: SessionEvent):
   if (!RENDERABLE.has(ev.type)) return
   getDb()
     .prepare('INSERT INTO transcript_cache (conversation_id, event_json) VALUES (?, ?)')
-    .run(conversationId, JSON.stringify(ev))
+    .run(conversationId, JSON.stringify(stampSessionEvent(ev)))
 }
 
 export function loadTranscript(conversationId: string): SessionEvent[] {
