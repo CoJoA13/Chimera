@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync } from 'node:f
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { getDb } from './db'
+import type { PluginInspection } from '../../shared/plugins'
 
 export interface PluginRecord {
   id: string
@@ -30,6 +31,58 @@ export function listPlugins(): PluginRecord[] {
     enabled: r.enabled === 1,
     gitUrl: r.git_url
   }))
+}
+
+function countFiles(root: string): number {
+  if (!existsSync(root)) return 0
+  let count = 0
+  const visit = (dir: string, depth: number): void => {
+    if (depth > 3 || count >= 200) return
+    for (const entry of readdirSync(dir, { withFileTypes: true }).slice(0, 200)) {
+      if (entry.isFile()) count++
+      else if (entry.isDirectory() && !entry.name.startsWith('.')) visit(join(dir, entry.name), depth + 1)
+      if (count >= 200) return
+    }
+  }
+  visit(root, 0)
+  return count
+}
+
+/** Slow filesystem inventory for Settings only; session startup keeps using listPlugins(). */
+export function inspectPlugins(): PluginInspection[] {
+  return listPlugins().map((plugin) => {
+    if (!existsSync(plugin.path)) {
+      return { id: plugin.id, description: null, version: null, capabilities: { skills: 0, agents: 0, commands: 0, hooks: 0 }, hasHooks: false, health: 'missing', issue: 'Plugin folder is missing' }
+    }
+    try {
+      const manifest = JSON.parse(readFileSync(join(plugin.path, '.claude-plugin', 'plugin.json'), 'utf8')) as Record<string, unknown>
+      const hooks = countFiles(join(plugin.path, 'hooks')) + (manifest.hooks ? 1 : 0)
+      return {
+        id: plugin.id,
+        description: typeof manifest.description === 'string' ? manifest.description : null,
+        version: typeof manifest.version === 'string' ? manifest.version : null,
+        capabilities: {
+          skills: countFiles(join(plugin.path, 'skills')),
+          agents: countFiles(join(plugin.path, 'agents')),
+          commands: countFiles(join(plugin.path, 'commands')),
+          hooks
+        },
+        hasHooks: hooks > 0,
+        health: 'ready',
+        issue: null
+      }
+    } catch (error) {
+      return {
+        id: plugin.id,
+        description: null,
+        version: null,
+        capabilities: { skills: 0, agents: 0, commands: 0, hooks: 0 },
+        hasHooks: false,
+        health: 'invalid',
+        issue: error instanceof Error ? error.message : 'Invalid plugin manifest'
+      }
+    }
+  })
 }
 
 /** Validate a Claude Code plugin folder and register it. */

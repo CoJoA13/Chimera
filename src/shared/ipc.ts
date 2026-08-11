@@ -1,4 +1,5 @@
 import type { SessionEvent } from './events'
+import type { PluginInspection } from './plugins'
 import type { ModelInfo, ProviderId } from './models'
 import type {
   ClaudeDesktopImportCandidate,
@@ -116,6 +117,7 @@ export interface ChimeraApi {
   listPlugins(): Promise<
     { id: string; name: string; path: string; enabled: boolean; gitUrl: string | null }[]
   >
+  inspectPlugins(): Promise<PluginInspection[]>
   addPlugin(): Promise<{ id: string; name: string } | null>
   installPluginsFromGit(url: string): Promise<{ id: string; name: string }[]>
   updatePlugin(id: string): Promise<void>
@@ -324,6 +326,7 @@ export const IPC = {
   mcpImportCandidates: 'mcp:importCandidates',
   mcpImport: 'mcp:import',
   pluginsList: 'plugins:list',
+  pluginsInspect: 'plugins:inspect',
   pluginsAdd: 'plugins:add',
   pluginsAddFromGit: 'plugins:addFromGit',
   pluginsUpdate: 'plugins:update',

@@ -74,6 +74,7 @@ const api: ChimeraApi = {
   mcpImport: (names: string[]) => ipcRenderer.invoke(IPC.mcpImport, { names }),
 
   listPlugins: () => ipcRenderer.invoke(IPC.pluginsList),
+  inspectPlugins: () => ipcRenderer.invoke(IPC.pluginsInspect),
   addPlugin: () => ipcRenderer.invoke(IPC.pluginsAdd),
   installPluginsFromGit: (url: string) => ipcRenderer.invoke(IPC.pluginsAddFromGit, { url }),
   updatePlugin: (id: string) => ipcRenderer.invoke(IPC.pluginsUpdate, { id }),

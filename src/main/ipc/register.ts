@@ -10,7 +10,8 @@ import {
   setPluginEnabled,
   removePlugin,
   installPluginsFromGit,
-  updatePlugin
+  updatePlugin,
+  inspectPlugins
 } from '../store/plugins'
 import { IPC } from '../../shared/ipc'
 import { MODEL_CATALOG } from '../../shared/models'
@@ -413,6 +414,7 @@ export function registerIpc(
 
   // plugins
   ipcMain.handle(IPC.pluginsList, () => listPlugins())
+  ipcMain.handle(IPC.pluginsInspect, () => inspectPlugins())
   ipcMain.handle(IPC.pluginsAdd, async () => {
     const result = await dialog.showOpenDialog({
       title: 'Select a Claude Code plugin folder',

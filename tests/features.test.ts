@@ -852,6 +852,29 @@ describe('github plugin installs', () => {
     removePlugin(a.id)
     expect(listPlugins().some((p) => p.id === a.id)).toBe(false)
   })
+
+  it('inspects capabilities and flags executable hooks separately from listing', async () => {
+    const { mkdtempSync, mkdirSync: mk, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { addPlugin, inspectPlugins, removePlugin } = await import('../src/main/store/plugins')
+    const dir = mkdtempSync(join(tmpdir(), 'chimera-plugin-inspect-'))
+    mk(join(dir, '.claude-plugin'), { recursive: true })
+    mk(join(dir, 'skills', 'audit'), { recursive: true })
+    mk(join(dir, 'hooks'), { recursive: true })
+    writeFileSync(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'inspected', version: '1.2.3', description: 'A test plugin' }))
+    writeFileSync(join(dir, 'skills', 'audit', 'SKILL.md'), '# Audit')
+    writeFileSync(join(dir, 'hooks', 'hooks.json'), '{}')
+    const plugin = addPlugin(dir, null, false)
+    expect(inspectPlugins().find((item) => item.id === plugin.id)).toMatchObject({
+      version: '1.2.3',
+      description: 'A test plugin',
+      hasHooks: true,
+      health: 'ready',
+      capabilities: { skills: 1, hooks: 1 }
+    })
+    removePlugin(plugin.id)
+  })
 })
 
 describe('templates', () => {
