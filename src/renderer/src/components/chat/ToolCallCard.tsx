@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle, Wrench } from 'lucide-react'
 
 function pretty(value: unknown): string {
@@ -74,6 +74,9 @@ export function ToolCallCard({
   defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  useEffect(() => {
+    if (defaultOpen) setOpen(true)
+  }, [defaultOpen])
 
   return (
     <div className="my-2 rounded-lg border border-[#30363d] bg-[#161b22]">

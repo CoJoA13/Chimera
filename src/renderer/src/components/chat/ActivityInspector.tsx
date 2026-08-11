@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Brain, X } from 'lucide-react'
 import { useChat, type Block } from '../../stores/chat'
 import { ToolCallCard } from './ToolCallCard'
@@ -17,6 +17,13 @@ export function ActivityInspector() {
   const activity = useChat((s) => (activeId ? s.activityByConv[activeId] : undefined))
   const blocks = useChat((s) => (activeId ? (s.blocksByConv[activeId] ?? []) : []))
   const [member, setMember] = useState<string>('all')
+  useEffect(() => setMember('all'), [activeId])
+  useEffect(() => {
+    if (!open || !selected) return
+    requestAnimationFrame(() => {
+      document.getElementById(`activity-${selected}`)?.scrollIntoView({ block: 'center' })
+    })
+  }, [open, selected])
   const members = useMemo(
     () => [...new Set(blocks.flatMap((block) => ('memberName' in block && block.memberName ? [block.memberName] : [])))],
     [blocks]
@@ -45,16 +52,16 @@ export function ActivityInspector() {
         </div>
       )}
       <div className="flex-1 overflow-y-auto p-3">
-        {!hasThinking && activity?.phase !== 'idle' && (
+        {!hasThinking && (
           <div className="mb-3 rounded-lg border border-slate-800 bg-[#11151c] p-3 text-xs text-slate-400">
-            No provider-supplied reasoning is available for this turn. Live status and tool activity will still appear here.
+            No provider-supplied reasoning is available in this conversation yet. Live status and tool activity will still appear here.
           </div>
         )}
         {entries.length === 0 ? (
           <div className="mt-16 text-center text-sm text-slate-600">Tool calls, reasoning, and agent traffic will appear here.</div>
         ) : (
           entries.map((block) => (
-            <div key={block.id} data-selected={selected === block.id || undefined} className={selected === block.id ? 'rounded-lg ring-1 ring-cyan-700' : ''}>
+            <div id={`activity-${block.id}`} key={block.id} data-selected={selected === block.id || undefined} className={selected === block.id ? 'rounded-lg ring-1 ring-cyan-700' : ''}>
               <div className="flex items-center gap-2 px-1 pt-2 text-[11px] text-slate-600">
                 {'memberName' in block && block.memberName && <span className="text-slate-400">{block.memberName}</span>}
                 <EventTime at={block.at} className="ml-auto" />
