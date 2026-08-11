@@ -9,13 +9,19 @@ function isActivity(block: Block): boolean {
   return block.kind === 'thinking' || block.kind === 'tool' || block.kind === 'bus' || block.kind === 'error' || block.kind === 'verification'
 }
 
+// Selectors must return STABLE references — a fresh [] per read makes React's
+// useSyncExternalStore loop forever (error #185, blank app). See ChatView.
+const EMPTY_BLOCKS: Block[] = []
+
 export function ActivityInspector() {
   const activeId = useChat((s) => s.activeConvId)
   const open = useChat((s) => s.activityInspectorOpen)
   const selected = useChat((s) => s.activityInspectorSelection)
   const close = useChat((s) => s.closeActivityInspector)
   const activity = useChat((s) => (activeId ? s.activityByConv[activeId] : undefined))
-  const blocks = useChat((s) => (activeId ? (s.blocksByConv[activeId] ?? []) : []))
+  const blocks = useChat((s) =>
+    activeId ? (s.blocksByConv[activeId] ?? EMPTY_BLOCKS) : EMPTY_BLOCKS
+  )
   const [member, setMember] = useState<string>('all')
   useEffect(() => setMember('all'), [activeId])
   useEffect(() => {
