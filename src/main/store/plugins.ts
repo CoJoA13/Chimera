@@ -33,13 +33,13 @@ export function listPlugins(): PluginRecord[] {
   }))
 }
 
-function countFiles(root: string): number {
+function countFiles(root: string, accept: (name: string) => boolean): number {
   if (!existsSync(root)) return 0
   let count = 0
   const visit = (dir: string, depth: number): void => {
     if (depth > 3 || count >= 200) return
     for (const entry of readdirSync(dir, { withFileTypes: true }).slice(0, 200)) {
-      if (entry.isFile()) count++
+      if (entry.isFile() && accept(entry.name)) count++
       else if (entry.isDirectory() && !entry.name.startsWith('.')) visit(join(dir, entry.name), depth + 1)
       if (count >= 200) return
     }
@@ -56,15 +56,15 @@ export function inspectPlugins(): PluginInspection[] {
     }
     try {
       const manifest = JSON.parse(readFileSync(join(plugin.path, '.claude-plugin', 'plugin.json'), 'utf8')) as Record<string, unknown>
-      const hooks = countFiles(join(plugin.path, 'hooks')) + (manifest.hooks ? 1 : 0)
+      const hooks = countFiles(join(plugin.path, 'hooks'), (name) => name === 'hooks.json') + (manifest.hooks ? 1 : 0)
       return {
         id: plugin.id,
         description: typeof manifest.description === 'string' ? manifest.description : null,
         version: typeof manifest.version === 'string' ? manifest.version : null,
         capabilities: {
-          skills: countFiles(join(plugin.path, 'skills')),
-          agents: countFiles(join(plugin.path, 'agents')),
-          commands: countFiles(join(plugin.path, 'commands')),
+          skills: countFiles(join(plugin.path, 'skills'), (name) => name === 'SKILL.md'),
+          agents: countFiles(join(plugin.path, 'agents'), (name) => name.endsWith('.md')),
+          commands: countFiles(join(plugin.path, 'commands'), (name) => name.endsWith('.md')),
           hooks
         },
         hasHooks: hooks > 0,

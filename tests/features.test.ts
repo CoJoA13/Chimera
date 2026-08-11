@@ -864,7 +864,7 @@ describe('github plugin installs', () => {
     mk(join(dir, 'hooks'), { recursive: true })
     writeFileSync(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'inspected', version: '1.2.3', description: 'A test plugin' }))
     writeFileSync(join(dir, 'skills', 'audit', 'SKILL.md'), '# Audit')
-    writeFileSync(join(dir, 'hooks', 'hooks.json'), '{}')
+    writeFileSync(join(dir, 'hooks', 'hooks.json'), '{"hooks":{}}')
     const plugin = addPlugin(dir, null, false)
     expect(inspectPlugins().find((item) => item.id === plugin.id)).toMatchObject({
       version: '1.2.3',
