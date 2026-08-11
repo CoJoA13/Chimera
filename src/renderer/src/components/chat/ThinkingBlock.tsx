@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Brain, ChevronDown, ChevronRight } from 'lucide-react'
 
-export function ThinkingBlock({ text, streaming }: { text: string; streaming: boolean }) {
-  const [open, setOpen] = useState(false)
+export function ThinkingBlock({ text, streaming, defaultOpen = false }: { text: string; streaming: boolean; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
 
   return (
     <div className="my-2">

@@ -11,6 +11,7 @@ import {
 import { useChat } from '../../stores/chat'
 import { MissionsSection } from './MissionsSection'
 import { BriefSection } from './BriefSection'
+import { EventTime } from '../chat/EventTime'
 
 interface TimelineRow {
   messageId: string
@@ -196,7 +197,7 @@ export function ControlRoom() {
                   className="rounded-lg border border-violet-900/50 bg-violet-950/20 p-2.5"
                 >
                   <div className="mb-1 text-xs text-violet-300">
-                    {nameOf(msg.fromId)} · {new Date(msg.at).toLocaleTimeString()}
+                    {nameOf(msg.fromId)} · <EventTime at={msg.at} />
                   </div>
                   <div className="text-sm whitespace-pre-wrap text-slate-300">{msg.text}</div>
                 </div>
@@ -235,7 +236,7 @@ export function ControlRoom() {
                 <ArrowRight size={11} />
                 <span>{nameOf(row.toId)}</span>
                 {row.inReplyTo && <span className="text-violet-500">(reply)</span>}
-                <span className="ml-auto">{new Date(row.createdAt).toLocaleTimeString()}</span>
+                <EventTime at={row.createdAt} className="ml-auto" />
               </div>
               <div className="line-clamp-3 text-sm whitespace-pre-wrap text-slate-300">
                 {row.text}

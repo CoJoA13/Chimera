@@ -1,11 +1,10 @@
 import { Virtuoso } from 'react-virtuoso'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Brain, CheckCircle2, Loader2, Wrench, XCircle } from 'lucide-react'
 import { useChat, type Block } from '../../stores/chat'
 import { MarkdownBlock } from './MarkdownBlock'
-import { ToolCallCard } from './ToolCallCard'
-import { ThinkingBlock } from './ThinkingBlock'
 import { BusMessageCard } from './BusMessageCard'
 import { VerificationChip } from './VerificationChip'
+import { EventTime } from './EventTime'
 
 const MEMBER_COLORS = [
   'text-orange-300',
@@ -29,7 +28,7 @@ function MemberLabel({ name }: { name?: string }) {
   )
 }
 
-function renderBlock(block: Block) {
+function renderBlock(block: Block, onInspect: (id: string) => void) {
   switch (block.kind) {
     case 'user':
       return (
@@ -48,6 +47,7 @@ function renderBlock(block: Block) {
                 ))}
               </div>
             )}
+            <EventTime at={block.at} className="mt-1 block text-right text-[10px] text-sky-400/60" />
           </div>
         </div>
       )
@@ -59,19 +59,24 @@ function renderBlock(block: Block) {
           {block.streaming && (
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-slate-400 align-text-bottom" />
           )}
+          <EventTime at={block.at} className="mt-1 block text-[10px] text-slate-600" />
         </div>
       )
     case 'thinking':
-      return <ThinkingBlock text={block.text} streaming={block.streaming} />
+      return (
+        <button onClick={() => onInspect(block.id)} className="my-1 flex items-center gap-1.5 rounded-full border border-slate-800 bg-[#11151c] px-2.5 py-1 text-xs text-slate-500 hover:border-slate-600 hover:text-slate-300">
+          <Brain size={12} /> {block.streaming ? 'Thinking…' : 'Reasoning'}
+          <EventTime at={block.at} className="text-[10px] text-slate-700" />
+        </button>
+      )
     case 'tool':
       return (
-        <ToolCallCard
-          toolName={block.toolName}
-          input={block.input}
-          output={block.output}
-          isError={block.isError}
-          done={block.done}
-        />
+        <button onClick={() => onInspect(block.id)} className="my-1 flex max-w-full items-center gap-1.5 rounded-full border border-[#30363d] bg-[#161b22] px-2.5 py-1 text-xs text-slate-400 hover:border-slate-600 hover:text-slate-200">
+          <Wrench size={12} />
+          <span className="truncate font-mono">{block.toolName}</span>
+          {!block.done ? <Loader2 size={12} className="animate-spin text-sky-400" /> : block.isError ? <XCircle size={12} className="text-red-400" /> : <CheckCircle2 size={12} className="text-emerald-400" />}
+          <EventTime at={block.at} className="text-[10px] text-slate-600" />
+        </button>
       )
     case 'footer':
       return (
@@ -79,6 +84,7 @@ function renderBlock(block: Block) {
           {block.memberName && (
             <span className={memberColor(block.memberName)}>{block.memberName}</span>
           )}
+          <EventTime at={block.at} className="ml-auto" />
           {block.isError ? (
             <span className="flex items-center gap-1 text-red-400">
               <AlertTriangle size={12} />
@@ -127,6 +133,7 @@ export function ChatView() {
   const blocks = useChat((s) =>
     s.activeConvId ? (s.blocksByConv[s.activeConvId] ?? EMPTY_BLOCKS) : EMPTY_BLOCKS
   )
+  const openInspector = useChat((s) => s.openActivityInspector)
 
   if (blocks.length === 0) {
     return (
@@ -152,7 +159,7 @@ export function ChatView() {
         // flow-root stops child margins collapsing through the wrapper, which
         // was breaking Virtuoso's height measurement (blank rows on scroll).
         <div className="flow-root px-4">
-          <div className="mx-auto max-w-3xl">{renderBlock(block)}</div>
+          <div className="mx-auto max-w-3xl">{renderBlock(block, openInspector)}</div>
         </div>
       )}
       components={{

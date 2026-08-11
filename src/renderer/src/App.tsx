@@ -21,6 +21,8 @@ import { OnboardingModal } from './components/onboarding/OnboardingModal'
 import { Toasts } from './components/common/Toasts'
 import { PermissionDialog } from './components/permissions/PermissionDialog'
 import { SettingsModal } from './components/settings/SettingsModal'
+import { AgentStatus } from './components/chat/AgentStatus'
+import { ActivityInspector } from './components/chat/ActivityInspector'
 
 export default function App() {
   const auth = useChat((s) => s.auth)
@@ -90,6 +92,7 @@ export default function App() {
             <span className="truncate text-xs text-slate-500">{groupMemberNames}</span>
           )}
           {activeView === 'chat' && <TemplateButton />}
+          {activeView === 'chat' && <AgentStatus />}
           <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
             {auth?.state === 'authenticated' ? (
               <>
@@ -120,6 +123,7 @@ export default function App() {
           <ControlRoom />
         )}
       </div>
+      {activeView === 'chat' && <ActivityInspector />}
       <PermissionDialog />
       <SettingsModal />
       <CommandPalette />

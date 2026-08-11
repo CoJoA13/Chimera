@@ -63,15 +63,17 @@ export function ToolCallCard({
   input,
   output,
   isError,
-  done
+  done,
+  defaultOpen = false
 }: {
   toolName: string
   input: unknown
   output?: unknown
   isError?: boolean
   done: boolean
+  defaultOpen?: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
 
   return (
     <div className="my-2 rounded-lg border border-[#30363d] bg-[#161b22]">
