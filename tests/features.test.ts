@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { readMemory, saveMemory, deleteMemory } from '../src/main/store/memory'
-import { recordSpend, todaySpend, spendByConversation } from '../src/main/store/spend'
+import {
+  recordSpend,
+  todaySpend,
+  todaySpendBreakdown,
+  spendByConversation
+} from '../src/main/store/spend'
 import { computeNextRun, addSchedule, dueSchedules, markRan } from '../src/main/store/schedules'
 import { createConversation } from '../src/main/store/conversations'
 import { saveTemplateFromConversation, getTemplate, listTemplates } from '../src/main/store/templates'
@@ -30,6 +35,7 @@ import {
   recordTranscriptEvent,
   searchTranscripts
 } from '../src/main/store/transcript'
+import { activitySince } from '../src/main/store/activity'
 
 const CODEX_OPTS = {
   model: 'gpt-5.4',
@@ -107,6 +113,29 @@ describe('database migrations', () => {
     })
     database.close()
   })
+
+  it('adds estimate tracking without changing legacy spend totals', () => {
+    const database = new DatabaseSync(':memory:')
+    database.exec(`
+      CREATE TABLE schema_version (version INTEGER NOT NULL);
+      INSERT INTO schema_version VALUES (0);
+      CREATE TABLE spend (
+        day TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        cost REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, conversation_id)
+      );
+      INSERT INTO spend VALUES ('2026-08-10', 'legacy', 1.25);
+    `)
+    applyMigrations(database, [
+      'ALTER TABLE spend ADD COLUMN estimated_cost REAL NOT NULL DEFAULT 0;'
+    ])
+    expect(database.prepare('SELECT cost, estimated_cost FROM spend').get()).toEqual({
+      cost: 1.25,
+      estimated_cost: 0
+    })
+    database.close()
+  })
 })
 
 describe('permission rules', () => {
@@ -118,7 +147,13 @@ describe('permission rules', () => {
       isAlwaysAllowed(tool, conversation, { cwd: '/tmp/project', command: 'git status' })
     ).toBe(true)
     expect(isAlwaysAllowed(tool, conversation, { command: 'rm -rf build' })).toBe(false)
-    for (const rule of listRules().filter((candidate) => candidate.toolName === tool)) {
+    const rules = listRules().filter((candidate) => candidate.toolName === tool)
+    expect(rules).toHaveLength(1)
+    expect(rules[0]).toMatchObject({
+      conversationId: conversation,
+      inputPattern: '{"command":"git status","cwd":"/tmp/project"}'
+    })
+    for (const rule of rules) {
       removeRule(rule.id)
     }
   })
@@ -161,7 +196,21 @@ describe('spend tracking', () => {
     recordSpend('spend-b', 1)
     expect(todaySpend()).toBeCloseTo(before + 1.75, 5)
     const rows = spendByConversation()
-    expect(rows.find((r) => r.conversationId === 'spend-a')?.cost).toBeCloseTo(0.75, 5)
+    expect(rows.find((r) => r.conversationId === 'spend-a')?.reportedCost).toBeCloseTo(0.75, 5)
+  })
+
+  it('keeps admission estimates separate from reported API cost', () => {
+    const before = todaySpendBreakdown()
+    recordSpend('spend-estimated', 0.1, 'estimated')
+    recordSpend('spend-estimated', 0.42, 'actual')
+    const after = todaySpendBreakdown()
+    expect(after.reportedCost).toBeCloseTo(before.reportedCost + 0.42, 5)
+    expect(after.estimatedCost).toBeCloseTo(before.estimatedCost + 0.1, 5)
+    expect(spendByConversation().find((row) => row.conversationId === 'spend-estimated')).toMatchObject({
+      reportedCost: 0.42,
+      estimatedCost: 0.1,
+      total: 0.52
+    })
   })
 
   it('ignores zero and negative costs', () => {
@@ -357,6 +406,43 @@ describe('watchers store', () => {
     } finally {
       removeWatchersFor(conversation.id)
       errorSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops a busy file trigger after five backoff retries and logs the drop', async () => {
+    vi.useFakeTimers()
+    const conversation = createConversation('claude', 'claude-sonnet-5', {
+      title: 'File exhaustion target'
+    })
+    const watcher = addWatcher(conversation.id, '/tmp', 'files', 'review it')
+    const since = Date.now() - 1
+    let busyChecks = 0
+    const manager = new WatcherManager({
+      isBusy: () => {
+        busyChecks++
+        return true
+      },
+      startForConversation: async () => ({ localId: conversation.id, resumed: false }),
+      send: async () => {},
+      groupSend: async () => {}
+    } as never)
+    const queue = manager as unknown as {
+      queueFileFire: (watcherId: string, filename: string) => void
+    }
+    try {
+      queue.queueFileFire(watcher.id, 'busy.txt')
+      await vi.advanceTimersByTimeAsync(13 * 60_000)
+      expect(busyChecks).toBe(6) // initial attempt + five retries
+      expect(
+        activitySince(since).some(
+          (row) => row.conversationId === conversation.id && row.text.includes('after 5 retries')
+        )
+      ).toBe(true)
+      await vi.advanceTimersByTimeAsync(60 * 60_000)
+      expect(busyChecks).toBe(6)
+    } finally {
+      removeWatchersFor(conversation.id)
       vi.useRealTimers()
     }
   })
@@ -567,6 +653,78 @@ describe('federation bus injection', () => {
       core.reply('local-target', 'fedmsg:test:remote-message', 'answer')
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
       expect(fetchMock.mock.calls[1][0]).toBe(`${peer.url}/deliver`)
+    } finally {
+      fetchMock.mockRestore()
+      getDb().prepare('DELETE FROM fed_peers WHERE id = ?').run(peerId)
+    }
+  })
+
+  it('culls an inbound-only sender after its reply grace expires', async () => {
+    const core = new BusCore()
+    const federation = new FederationManager(core)
+    const peer = {
+      id: `peer-expiry-${Date.now()}`,
+      name: 'Expiry peer',
+      url: 'http://127.0.0.1:1/fed/token'
+    }
+    getDb()
+      .prepare('INSERT INTO fed_peers (id, name, url, added_at) VALUES (?, ?, ?, ?)')
+      .run(peer.id, peer.name, peer.url, Date.now())
+    const wire = {
+      messageId: 'expiry-message',
+      targetId: 'local-target',
+      fromId: 'remote-expiry-sender',
+      fromTitle: 'Remote expiry sender',
+      text: 'hello',
+      expectsReply: false
+    }
+    const register = federation as unknown as {
+      registerInboundSender: (p: typeof peer, message: typeof wire) => string
+    }
+    let now = 1_000_000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const senderProxy = register.registerInboundSender(peer, wire)
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      fetchMock.mockImplementation(async () =>
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      )
+      await federation.syncPeers()
+      expect(core.listSessions('').map((session) => session.localId)).toContain(senderProxy)
+      now += 10 * 60_000 + 1
+      await federation.syncPeers()
+      expect(core.listSessions('').map((session) => session.localId)).not.toContain(senderProxy)
+    } finally {
+      fetchMock.mockRestore()
+      clock.mockRestore()
+      getDb().prepare('DELETE FROM fed_peers WHERE id = ?').run(peer.id)
+    }
+  })
+
+  it('does not cull peer proxies when discovery is unreachable', async () => {
+    const core = new BusCore()
+    const federation = new FederationManager(core)
+    const peerId = `peer-unreachable-${Date.now()}`
+    getDb()
+      .prepare('INSERT INTO fed_peers (id, name, url, added_at) VALUES (?, ?, ?, ?)')
+      .run(peerId, 'Unreachable peer', 'http://127.0.0.1:1/fed/token', Date.now())
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: 'remote', title: 'Remote', provider: 'codex' }]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      )
+      await federation.syncPeers()
+      fetchMock.mockRejectedValueOnce(new Error('offline'))
+      await federation.syncPeers()
+      expect(core.listSessions('').map((session) => session.localId)).toContain(
+        `fed:${peerId}:remote`
+      )
     } finally {
       fetchMock.mockRestore()
       getDb().prepare('DELETE FROM fed_peers WHERE id = ?').run(peerId)
