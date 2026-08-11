@@ -37,6 +37,7 @@ interface Awaiting {
 }
 
 const INBOX_CAP = 20
+const MESSAGE_HISTORY_CAP = 10_000
 export const MAX_AWAIT_SECONDS = 300
 export const DEFAULT_AWAIT_SECONDS = 120
 
@@ -60,6 +61,30 @@ export class BusCore {
   onExchange?: (msg: BusMessage, kind: 'sent' | 'replied') => void
   /** Observer for live await state: the peer localIds currently being awaited. */
   onAwaitChange?: (localId: string, peerLocalIds: string[]) => void
+
+  private remember(msg: BusMessage): void {
+    if (this.messages.has(msg.messageId)) {
+      throw new Error(`Duplicate message id: ${msg.messageId}`)
+    }
+    this.messages.set(msg.messageId, msg)
+    let inspected = 0
+    while (this.messages.size > MESSAGE_HISTORY_CAP && inspected < this.messages.size) {
+      const oldest = this.messages.keys().next().value as string | undefined
+      if (!oldest) break
+      // Active awaits must remain correlatable. Move one to the newest
+      // position and try the next candidate instead.
+      if (this.awaiting.has(oldest)) {
+        const active = this.messages.get(oldest)!
+        this.messages.delete(oldest)
+        this.messages.set(oldest, active)
+        inspected++
+        continue
+      }
+      this.messages.delete(oldest)
+      this.repliedTo.delete(oldest)
+      inspected = 0
+    }
+  }
 
   private addAwait(messageId: string, entry: Awaiting): void {
     this.awaiting.set(messageId, entry)
@@ -130,7 +155,7 @@ export class BusCore {
       text,
       expectsReply
     }
-    this.messages.set(msg.messageId, msg)
+    this.remember(msg)
     this.onExchange?.(msg, 'sent')
     this.route(msg)
     return msg.messageId
@@ -156,7 +181,7 @@ export class BusCore {
       inReplyTo: inReplyToMessageId,
       expectsReply: false
     }
-    this.messages.set(reply.messageId, reply)
+    this.remember(reply)
 
     // If the sender is blocked awaiting this message, resolve that await.
     // ('replied' exchanges render both cards; routed replies render the 'in'
@@ -177,7 +202,13 @@ export class BusCore {
    * it for reply correlation; resolves a matching await if it is a reply.
    */
   injectExternal(msg: BusMessage): void {
-    this.messages.set(msg.messageId, msg)
+    if (msg.inReplyTo) {
+      const candidate = this.awaiting.get(msg.inReplyTo)
+      if (candidate && candidate.targetLocalId !== msg.from) {
+        throw new Error('Federated reply sender does not match the awaited session')
+      }
+    }
+    this.remember(msg)
     if (msg.inReplyTo) {
       const awaiting = this.removeAwait(msg.inReplyTo)
       if (awaiting) {

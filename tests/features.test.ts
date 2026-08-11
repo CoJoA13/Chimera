@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { DatabaseSync } from 'node:sqlite'
 import { readMemory, saveMemory, deleteMemory } from '../src/main/store/memory'
 import { recordSpend, todaySpend, spendByConversation } from '../src/main/store/spend'
 import { computeNextRun, addSchedule, dueSchedules, markRan } from '../src/main/store/schedules'
@@ -12,6 +13,117 @@ import {
   setWatcherState,
   removeWatchersFor
 } from '../src/main/store/watchers'
+import { resolveCodexExecutionPolicy } from '../src/main/providers/codex/CodexProvider'
+import { applyMigrations } from '../src/main/store/db'
+import {
+  addAlwaysAllowRule,
+  isAlwaysAllowed,
+  removeRule,
+  listRules
+} from '../src/main/store/permissions'
+import { groupMessageMentions } from '../src/main/ipc/sessions'
+import { decodeWireBody, validateWireMessage } from '../src/main/federation'
+
+const CODEX_OPTS = {
+  model: 'gpt-5.4',
+  onEvent: () => {}
+}
+
+describe('Codex execution policy', () => {
+  it('keeps a conversation read-only until a workspace is explicitly selected', () => {
+    expect(resolveCodexExecutionPolicy(CODEX_OPTS).sandboxMode).toBe('read-only')
+    expect(
+      resolveCodexExecutionPolicy({ ...CODEX_OPTS, cwd: '/tmp/project' })
+    ).toMatchObject({ workingDirectory: '/tmp/project', sandboxMode: 'workspace-write' })
+  })
+
+  it('pins plan and explicit full-access mappings', () => {
+    expect(
+      resolveCodexExecutionPolicy({ ...CODEX_OPTS, cwd: '/tmp/project', permissionMode: 'plan' })
+        .sandboxMode
+    ).toBe('read-only')
+    expect(
+      resolveCodexExecutionPolicy({ ...CODEX_OPTS, permissionMode: 'bypassPermissions' })
+        .sandboxMode
+    ).toBe('danger-full-access')
+  })
+})
+
+describe('database migrations', () => {
+  it('repairs a legacy database stopped between ALTER statements', () => {
+    const database = new DatabaseSync(':memory:')
+    database.exec(`
+      CREATE TABLE schema_version (version INTEGER NOT NULL);
+      INSERT INTO schema_version VALUES (0);
+      CREATE TABLE example (id TEXT PRIMARY KEY);
+      ALTER TABLE example ADD COLUMN first_value TEXT;
+    `)
+    applyMigrations(database, [
+      `ALTER TABLE example ADD COLUMN first_value TEXT;
+       ALTER TABLE example ADD COLUMN second_value TEXT;`
+    ])
+    const columns = database.prepare('PRAGMA table_info(example)').all() as unknown as {
+      name: string
+    }[]
+    expect(columns.map((column) => column.name)).toEqual(['id', 'first_value', 'second_value'])
+    expect(database.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 1 })
+    database.close()
+  })
+
+  it('rolls back both schema and version when a migration fails', () => {
+    const database = new DatabaseSync(':memory:')
+    expect(() =>
+      applyMigrations(database, [
+        `CREATE TABLE durable (id TEXT);
+         THIS IS NOT SQL;`
+      ])
+    ).toThrow()
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'durable'").get()).toBeUndefined()
+    expect(database.prepare('SELECT version FROM schema_version').get()).toBeUndefined()
+    database.close()
+  })
+
+  it('expires legacy tool-wide permission rules when input scoping is introduced', () => {
+    const database = new DatabaseSync(':memory:')
+    database.exec(`
+      CREATE TABLE schema_version (version INTEGER NOT NULL);
+      INSERT INTO schema_version VALUES (0);
+      CREATE TABLE permission_rules (id TEXT, tool_name TEXT, behavior TEXT);
+      INSERT INTO permission_rules VALUES ('legacy', 'Bash', 'allow');
+    `)
+    applyMigrations(database, [
+      `ALTER TABLE permission_rules ADD COLUMN input_pattern TEXT;
+       DELETE FROM permission_rules WHERE input_pattern IS NULL;`
+    ])
+    expect(database.prepare('SELECT COUNT(*) count FROM permission_rules').get()).toEqual({
+      count: 0
+    })
+    database.close()
+  })
+})
+
+describe('permission rules', () => {
+  it('scopes a new always-allow rule to the approved tool input', () => {
+    const tool = `Bash-${Date.now()}`
+    const conversation = 'permission-scope-test'
+    addAlwaysAllowRule(tool, conversation, { command: 'git status', cwd: '/tmp/project' })
+    expect(
+      isAlwaysAllowed(tool, conversation, { cwd: '/tmp/project', command: 'git status' })
+    ).toBe(true)
+    expect(isAlwaysAllowed(tool, conversation, { command: 'rm -rf build' })).toBe(false)
+    for (const rule of listRules().filter((candidate) => candidate.toolName === tool)) {
+      removeRule(rule.id)
+    }
+  })
+})
+
+describe('group mentions', () => {
+  it('does not wake a prefix-named member', () => {
+    expect(groupMessageMentions('@Tester please verify', 'Tester')).toBe(true)
+    expect(groupMessageMentions('@Tester please verify', 'Test')).toBe(false)
+    expect(groupMessageMentions('Question for @Code Reviewer.', 'Code Reviewer')).toBe(true)
+  })
+})
 
 describe('agent memory', () => {
   it('round-trips and enforces the size cap', () => {
@@ -172,6 +284,26 @@ describe('federation bus injection', () => {
     })
     expect(await pending).toEqual({ status: 'replied', text: 'remote answer' })
   })
+
+  it('validates federated delivery payloads and caps message text', () => {
+    const valid = {
+      messageId: 'wire-1',
+      targetId: 'local-a',
+      fromId: 'remote-a',
+      fromTitle: 'Remote',
+      text: 'hello',
+      expectsReply: false
+    }
+    expect(validateWireMessage(valid)).toEqual(valid)
+    expect(() => validateWireMessage({})).toThrow()
+    expect(() => validateWireMessage({ ...valid, text: 'x'.repeat(256 * 1024 + 1) })).toThrow()
+  })
+
+  it('decodes UTF-8 correctly when a code point spans network chunks', () => {
+    const bytes = Buffer.from('A🙂B')
+    const chunks = [bytes.subarray(0, 3), bytes.subarray(3, 5), bytes.subarray(5)]
+    expect(decodeWireBody(chunks, bytes.length)).toBe('A🙂B')
+  })
 })
 
 describe('missions', () => {
@@ -215,18 +347,12 @@ describe('skill distillation', () => {
 describe('github plugin installs', () => {
   it('normalizes repo inputs', async () => {
     const { normalizeGitUrl } = await import('../src/main/store/plugins')
-    expect(normalizeGitUrl('owner/repo')).toEqual({
-      url: 'https://github.com/owner/repo.git',
-      dirName: 'owner-repo'
-    })
-    expect(normalizeGitUrl('https://github.com/o/r.git/')).toEqual({
-      url: 'https://github.com/o/r.git',
-      dirName: 'o-r'
-    })
-    expect(normalizeGitUrl('https://github.com/o/r')).toEqual({
-      url: 'https://github.com/o/r.git',
-      dirName: 'o-r'
-    })
+    const short = normalizeGitUrl('owner/repo')
+    expect(short.url).toBe('https://github.com/owner/repo.git')
+    expect(short.dirName).toMatch(/^owner-repo-[a-f0-9]{8}$/)
+    const full = normalizeGitUrl('https://github.com/o/r.git/')
+    expect(full).toEqual(normalizeGitUrl('https://github.com/o/r'))
+    expect(full.url).toBe('https://github.com/o/r.git')
     expect(() => normalizeGitUrl('https://gitlab.com/o/r')).toThrow(/github/)
     expect(() => normalizeGitUrl('not a repo')).toThrow()
   })

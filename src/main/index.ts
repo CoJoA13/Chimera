@@ -16,7 +16,9 @@ app.setPath('userData', join(app.getPath('appData'), 'chimera'))
 
 // Single instance: schedules/watchers/federation must not run twice over one DB.
 if (!app.requestSingleInstanceLock()) {
-  app.quit()
+  // Exit synchronously: do not let the losing process reach whenReady and
+  // briefly touch the shared DB, schedulers, watchers, or federation port.
+  app.exit(0)
 }
 app.on('second-instance', () => {
   if (mainWindow) {
@@ -47,9 +49,28 @@ function createWindow(): void {
     }
   })
 
+  const openExternalHttp = (url: string): void => {
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        void shell.openExternal(parsed.toString())
+      }
+    } catch {
+      // Ignore malformed and non-web URLs.
+    }
+  }
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    openExternalHttp(url)
     return { action: 'deny' }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url === mainWindow?.webContents.getURL()) return
+    event.preventDefault()
+    openExternalHttp(url)
+  })
+  mainWindow.webContents.on('will-attach-webview', (event) => {
+    event.preventDefault()
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

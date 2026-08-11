@@ -208,4 +208,39 @@ describe('BusCore', () => {
     makeSession(core, 'a', 'A')
     expect(() => core.send('a', 'ghost', 'hi', false)).toThrow(/No such session/)
   })
+
+  it('rejects external message-id collisions', () => {
+    makeSession(core, 'a', 'A')
+    makeSession(core, 'b', 'B')
+    const id = core.send('a', 'b', 'local message', false)
+    expect(() =>
+      core.injectExternal({
+        messageId: id,
+        from: 'fed:attacker',
+        to: 'a',
+        text: 'overwrite',
+        expectsReply: false
+      })
+    ).toThrow(/duplicate message id/i)
+  })
+
+  it('rejects a federated reply from the wrong peer', async () => {
+    makeSession(core, 'a', 'A')
+    makeSession(core, 'fed:peer-one', 'Peer one')
+    makeSession(core, 'fed:peer-two', 'Peer two')
+    const id = core.send('a', 'fed:peer-one', 'question', true)
+    const pending = core.awaitReply('a', id, 1)
+    expect(() =>
+      core.injectExternal({
+        messageId: 'forged-reply',
+        from: 'fed:peer-two',
+        to: 'a',
+        text: 'forged',
+        inReplyTo: id,
+        expectsReply: false
+      })
+    ).toThrow(/does not match/i)
+    core.reply('fed:peer-one', id, 'real answer')
+    expect(await pending).toEqual({ status: 'replied', text: 'real answer' })
+  })
 })

@@ -46,6 +46,25 @@ function findCodexCliPath(): string | null {
   return candidates.find((c) => existsSync(c)) ?? null
 }
 
+export function resolveCodexExecutionPolicy(opts: CreateSessionOptions): {
+  workingDirectory: string
+  sandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access'
+} {
+  if (opts.permissionMode === 'bypassPermissions') {
+    return {
+      workingDirectory: opts.cwd ?? homedir(),
+      sandboxMode: 'danger-full-access'
+    }
+  }
+  return {
+    workingDirectory: opts.cwd ?? homedir(),
+    // A new conversation has no explicitly granted workspace. Keep it
+    // read-only until the user chooses a folder instead of treating all of
+    // $HOME as the writable workspace.
+    sandboxMode: opts.permissionMode === 'plan' || !opts.cwd ? 'read-only' : 'workspace-write'
+  }
+}
+
 class CodexSession implements ProviderSession {
   readonly localId: string
   providerSessionId: string | null = null
@@ -57,6 +76,7 @@ class CodexSession implements ProviderSession {
   private currentTurnId = ''
   private abort: AbortController | null = null
   private preambleSent: boolean
+  private disposed = false
 
   constructor(localId: string, private readonly opts: CreateSessionOptions, resumeThreadId?: string) {
     this.localId = localId
@@ -79,16 +99,10 @@ class CodexSession implements ProviderSession {
     // permission mechanism. Known codex bug: MCP tool calls (incl. chimera-bus
     // replies) are auto-cancelled unless the sandbox is danger-full-access
     // (openai/codex#16685) — so bypassPermissions is what enables bus replies.
-    const sandboxMode =
-      this.opts.permissionMode === 'bypassPermissions'
-        ? ('danger-full-access' as const)
-        : this.opts.permissionMode === 'plan'
-          ? ('read-only' as const)
-          : ('workspace-write' as const)
+    const policy = resolveCodexExecutionPolicy(this.opts)
     return {
       model: this.model,
-      workingDirectory: this.opts.cwd ?? homedir(),
-      sandboxMode,
+      ...policy,
       approvalPolicy: 'never' as const,
       skipGitRepoCheck: true
     }
@@ -102,12 +116,13 @@ class CodexSession implements ProviderSession {
 
   /** Codex cannot run concurrent turns on one thread — queue while busy. */
   async send(input: UserInput): Promise<void> {
+    if (this.disposed) throw new Error('Session is disposed')
     this.sendQueue.push(input)
     this.processQueue()
   }
 
   private processQueue(): void {
-    if (this.status === 'busy') return
+    if (this.disposed || this.status === 'busy') return
     const input = this.sendQueue.shift()
     if (!input) return
     this.currentTurnId = randomUUID()
@@ -325,9 +340,10 @@ class CodexSession implements ProviderSession {
         this.status = 'idle'
         this.emit({ type: 'turn.completed', localId, turnId, isError: false })
       }
-      this.processQueue()
+      if (!this.disposed) this.processQueue()
     } catch (err) {
       this.status = 'idle'
+      if (this.disposed) return
       const message = err instanceof Error ? err.message : String(err)
       if (this.abort?.signal.aborted) {
         this.emit({ type: 'turn.completed', localId, turnId, isError: false })
@@ -359,6 +375,8 @@ class CodexSession implements ProviderSession {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true
+    this.sendQueue = []
     this.abort?.abort()
   }
 }

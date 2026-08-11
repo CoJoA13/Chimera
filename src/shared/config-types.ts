@@ -31,7 +31,12 @@ export interface ConversationRecord {
   /** Cross-model verification annotations on this conversation's answers. */
   autoVerify: boolean
   /** Populated on kind='group' records when listing. */
-  groupMembers?: { id: string; title: string; provider: ProviderId }[]
+  groupMembers?: {
+    id: string
+    title: string
+    provider: ProviderId
+    permissionMode: ConversationRecord['permissionMode']
+  }[]
   createdAt: number
   updatedAt: number
 }

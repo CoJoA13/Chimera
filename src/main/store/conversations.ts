@@ -54,7 +54,8 @@ export function listConversations(): ConversationRecord[] {
       record.groupMembers = listGroupMembers(record.id).map((m) => ({
         id: m.id,
         title: m.title,
-        provider: m.provider
+        provider: m.provider,
+        permissionMode: m.permissionMode
       }))
     }
     return record

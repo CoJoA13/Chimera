@@ -619,12 +619,12 @@ export function registerIpc(
 
   // generic settings
   ipcMain.handle(IPC.settingsGet, (_e, payload: unknown) => {
-    const { key } = z.object({ key: z.string().min(1).max(60) }).parse(payload)
+    const { key } = z.object({ key: z.literal('onboarded') }).parse(payload)
     return getSetting<unknown>(key, null)
   })
   ipcMain.handle(IPC.settingsSet, (_e, payload: unknown) => {
     const { key, value } = z
-      .object({ key: z.string().min(1).max(60), value: z.unknown() })
+      .object({ key: z.literal('onboarded'), value: z.boolean() })
       .parse(payload)
     setSetting(key, value)
   })

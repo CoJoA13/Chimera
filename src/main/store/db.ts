@@ -151,8 +151,52 @@ const MIGRATIONS: string[] = [
   `,
   `
   ALTER TABLE plugins ADD COLUMN git_url TEXT;
+  `,
+  `
+  ALTER TABLE permission_rules ADD COLUMN input_pattern TEXT;
+  DELETE FROM permission_rules WHERE input_pattern IS NULL;
   `
 ]
+
+function migrationStatements(sql: string): string[] {
+  return sql
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter(Boolean)
+}
+
+/**
+ * Apply each migration and its version bump atomically. Duplicate-column
+ * errors are ignored statement-by-statement so databases left half-upgraded
+ * by pre-0.1 builds can repair themselves on the next launch.
+ */
+export function applyMigrations(database: DatabaseSync, migrations = MIGRATIONS): void {
+  database.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);')
+  const row = database.prepare('SELECT version FROM schema_version').get() as
+    | { version: number }
+    | undefined
+  let version = row?.version ?? 0
+  while (version < migrations.length) {
+    database.exec('BEGIN IMMEDIATE;')
+    try {
+      for (const statement of migrationStatements(migrations[version])) {
+        try {
+          database.exec(`${statement};`)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          if (!/duplicate column name/i.test(message)) throw err
+        }
+      }
+      version++
+      database.exec('DELETE FROM schema_version;')
+      database.prepare('INSERT INTO schema_version (version) VALUES (?)').run(version)
+      database.exec('COMMIT;')
+    } catch (err) {
+      database.exec('ROLLBACK;')
+      throw err
+    }
+  }
+}
 
 export function getDb(): DatabaseSync {
   if (db) return db
@@ -160,16 +204,8 @@ export function getDb(): DatabaseSync {
   mkdirSync(dir, { recursive: true })
   db = new DatabaseSync(join(dir, 'chimera.db'))
   db.exec('PRAGMA journal_mode = WAL;')
-  db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);')
-  const row = db.prepare('SELECT version FROM schema_version').get() as
-    | { version: number }
-    | undefined
-  let version = row?.version ?? 0
-  while (version < MIGRATIONS.length) {
-    db.exec(MIGRATIONS[version])
-    version++
-  }
-  db.exec('DELETE FROM schema_version;')
-  db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(version)
+  db.exec('PRAGMA foreign_keys = ON;')
+  db.exec('PRAGMA busy_timeout = 5000;')
+  applyMigrations(db)
   return db
 }

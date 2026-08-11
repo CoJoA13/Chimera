@@ -4,6 +4,13 @@ import { PERSONA_PRESETS } from '../../../../shared/config-types'
 import { DEFAULT_MODEL } from '../../../../shared/models'
 import { useChat } from '../../stores/chat'
 
+const PERMISSION_MODES = [
+  { id: 'default', label: 'Ask' },
+  { id: 'acceptEdits', label: 'Accept edits' },
+  { id: 'plan', label: 'Read-only' },
+  { id: 'bypassPermissions', label: 'Full access' }
+] as const
+
 /** View and edit the lineup of the active group chat. */
 export function GroupMembersPopover() {
   const active = useChat((s) => s.conversations.find((c) => c.id === s.activeConvId))
@@ -106,6 +113,31 @@ export function GroupMembersPopover() {
                   {m.title}
                 </button>
               )}
+              <select
+                value={m.permissionMode}
+                onChange={(event) => {
+                  const mode = event.target.value as (typeof PERMISSION_MODES)[number]['id']
+                  if (
+                    mode === 'bypassPermissions' &&
+                    !window.confirm(
+                      `Give ${m.title} full access? This disables permission prompts and the Codex sandbox.`
+                    )
+                  ) {
+                    return
+                  }
+                  void window.chimera.setPermissionMode(m.id, mode).then(refresh).catch((err) => {
+                    setError(err instanceof Error ? err.message : String(err))
+                  })
+                }}
+                className="max-w-24 rounded border border-[#30363d] bg-[#161b22] px-1 py-0.5 text-[10px] text-slate-400"
+                title={`Permission mode for ${m.title}`}
+              >
+                {PERMISSION_MODES.map((mode) => (
+                  <option key={mode.id} value={mode.id}>
+                    {mode.label}
+                  </option>
+                ))}
+              </select>
               <button
                 onClick={() => void removeMember(m.id)}
                 className="text-slate-600 hover:text-red-400"

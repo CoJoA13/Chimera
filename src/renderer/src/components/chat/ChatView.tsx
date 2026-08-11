@@ -149,7 +149,9 @@ export function ChatView() {
       initialTopMostItemIndex={blocks.length - 1}
       increaseViewportBy={{ top: 600, bottom: 300 }}
       itemContent={(_i, block) => (
-        <div className="px-4">
+        // flow-root stops child margins collapsing through the wrapper, which
+        // was breaking Virtuoso's height measurement (blank rows on scroll).
+        <div className="flow-root px-4">
           <div className="mx-auto max-w-3xl">{renderBlock(block)}</div>
         </div>
       )}

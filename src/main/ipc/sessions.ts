@@ -1,5 +1,6 @@
 import { BrowserWindow, Notification } from 'electron'
 import type { WebContents } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { getSessionMessages } from '@anthropic-ai/claude-agent-sdk'
 import type { SessionEvent } from '../../shared/events'
 import type { PermissionDecision, ProviderSession, McpServerRuntimeConfig } from '../providers/types'
@@ -94,6 +95,9 @@ interface LiveSession {
   sender: EventSender
   conversationId: string
   status: 'idle' | 'busy'
+  generation: string
+  pendingBudgetPermitTokens: string[]
+  budgetPermitByTurnId: Map<string, string>
   /** Final text of the in-flight turn, for auto-verification. */
   lastAnswer?: string
 }
@@ -102,6 +106,7 @@ interface PendingPermission {
   resolve: (d: PermissionDecision) => void
   toolName: string
   conversationId: string
+  input: Record<string, unknown>
 }
 
 /** The bus identity of the app itself — conferences and user-directed reports. */
@@ -114,10 +119,29 @@ export interface ConferenceReply {
   error?: string
 }
 
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+export function groupMessageMentions(text: string, memberTitle: string): boolean {
+  return new RegExp(`@${escapeRegex(memberTitle)}(?![\\p{L}\\p{N}_])`, 'iu').test(text)
+}
+
+const BUDGET_TURN_RESERVATION_USD = 0.1
+
 export class SessionManager {
   /** Live sessions, keyed by conversationId (session localId === conversationId). */
   private sessions = new Map<string, LiveSession>()
+  private starting = new Map<string, Promise<{ localId: string; resumed: boolean }>>()
   private pendingPermissions = new Map<string, PendingPermission>()
+  private budgetReservations = new Map<
+    string,
+    {
+    conversationId: string
+    generation: string
+      estimatedUsd: number
+    }
+  >()
   private readonly bus = new BusCore()
   private readonly busHttp = new BusHttpServer(this.bus)
 
@@ -359,7 +383,11 @@ export class SessionManager {
       `Agent message for "${getConversation(conversationId)?.title ?? 'conversation'}"`,
       `From ${fromTitle}: ${messages[0].text}`
     )
-    void live.session.send({ text })
+    void this.dispatchProviderTurn(live, { text }).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      live.sender.push({ type: 'session.error', localId: conversationId, message, fatal: false })
+      logActivity('bus', `Inbound bus turn rejected: ${message}`, conversationId)
+    })
   }
 
   /** Start (or return the already-live) session for a conversation. */
@@ -369,6 +397,18 @@ export class SessionManager {
     if (this.sessions.has(conversationId)) {
       return { localId: conversationId, resumed: false }
     }
+    const existingStart = this.starting.get(conversationId)
+    if (existingStart) return existingStart
+    const start = this.startNewSession(conversationId).finally(() => {
+      this.starting.delete(conversationId)
+    })
+    this.starting.set(conversationId, start)
+    return start
+  }
+
+  private async startNewSession(
+    conversationId: string
+  ): Promise<{ localId: string; resumed: boolean }> {
 
     const conversation = getConversation(conversationId)
     if (!conversation) throw new Error(`Unknown conversation: ${conversationId}`)
@@ -380,6 +420,8 @@ export class SessionManager {
     // Stable identity: the session's localId IS the conversation id, so bus
     // registrations and renderer routing survive restarts.
     const localId = conversationId
+    const sessionGeneration = randomUUID()
+    let sessionInstalled = false
     // Group members stream into their group's transcript with attribution.
     const groupId = conversation.groupId
     const streamId = groupId ?? conversationId
@@ -473,6 +515,15 @@ export class SessionManager {
           ? [...enabledPluginPaths(), { type: 'local' as const, path: distilledPluginPath() }]
           : undefined,
       onEvent: (ev: SessionEvent) => {
+        // Provider pumps can finish after disposal. Once this generation has
+        // been installed, ignore every event unless it is still the active
+        // LiveSession; stale completions/errors must not mutate a restart.
+        if (
+          sessionInstalled &&
+          this.sessions.get(localId)?.generation !== sessionGeneration
+        ) {
+          return
+        }
         if (ev.type === 'session.registered') {
           setProviderSessionId(conversationId, ev.providerSessionId)
           if (conversation.forkPending) clearForkPending(conversationId)
@@ -483,8 +534,14 @@ export class SessionManager {
           if (live) live.lastAnswer = ev.text
         }
         const live = this.sessions.get(localId)
-        if (live) {
-          if (ev.type === 'turn.started') live.status = 'busy'
+        if (live?.generation === sessionGeneration) {
+          if (ev.type === 'turn.started') {
+            live.status = 'busy'
+            const permitToken = live.pendingBudgetPermitTokens.shift()
+            if (permitToken) {
+              live.budgetPermitByTurnId.set(ev.turnId, permitToken)
+            }
+          }
           if (ev.type === 'turn.completed' || (ev.type === 'session.error' && ev.fatal)) {
             live.status = 'idle'
           }
@@ -492,10 +549,44 @@ export class SessionManager {
         // Zombie recovery: a fatally-errored session is torn down so the next
         // send lazily restarts it with resume.
         if (ev.type === 'session.error' && ev.fatal) {
+          if (groupId) {
+            const turns = this.groupTurns.get(groupId) ?? new Set<string>()
+            const wasActive = turns.delete(conversationId)
+            if (turns.size === 0) this.groupTurns.delete(groupId)
+            if (wasActive) {
+              sender.push({
+                type: 'turn.completed',
+                localId: groupId,
+                turnId: `fatal:${conversationId}`,
+                memberName,
+                isError: true,
+                errorMessage: ev.message,
+                groupDone: turns.size === 0
+              })
+            }
+          }
           void this.dispose(localId)
         }
         if (ev.type === 'turn.completed') {
+          const currentLive = this.sessions.get(localId)
+          const permitToken =
+            currentLive?.generation === sessionGeneration
+              ? currentLive.budgetPermitByTurnId.get(ev.turnId)
+              : undefined
+          let estimatedUsd = 0
+          if (permitToken) {
+            currentLive!.budgetPermitByTurnId.delete(ev.turnId)
+            estimatedUsd = this.releaseBudgetTurn(
+              conversationId,
+              sessionGeneration,
+              permitToken
+            )
+          }
+          // Claude reports exact cost. Providers without cost reporting still
+          // consume the admission estimate so their turns cannot bypass the
+          // daily budget entirely.
           if (ev.costUsd) recordSpend(conversationId, ev.costUsd)
+          else if (estimatedUsd > 0) recordSpend(conversationId, estimatedUsd)
           // Auto-verification: check the answer with the OTHER provider, async.
           const live2 = this.sessions.get(localId)
           const answer = live2?.lastAnswer
@@ -545,14 +636,15 @@ export class SessionManager {
         input: Record<string, unknown>
         suggestions?: unknown
       }): Promise<PermissionDecision> => {
-        if (isAlwaysAllowed(permReq.toolName, conversationId)) {
+        if (isAlwaysAllowed(permReq.toolName, conversationId, permReq.input)) {
           return { behavior: 'allow' }
         }
         return new Promise<PermissionDecision>((resolve) => {
           this.pendingPermissions.set(permReq.requestId, {
             resolve,
             toolName: permReq.toolName,
-            conversationId
+            conversationId,
+            input: permReq.input
           })
           sender.push({
             type: 'permission.request',
@@ -570,7 +662,16 @@ export class SessionManager {
       ? provider.resumeSession(localId, conversation.providerSessionId, opts)
       : provider.createSession(localId, opts)
 
-    this.sessions.set(localId, { session, sender, conversationId, status: 'idle' })
+    this.sessions.set(localId, {
+      session,
+      sender,
+      conversationId,
+      status: 'idle',
+      generation: sessionGeneration,
+      pendingBudgetPermitTokens: [],
+      budgetPermitByTurnId: new Map()
+    })
+    sessionInstalled = true
     // Ensure the directory entry exists (idempotent — covers conversations
     // created before initBusDirectory learned about them).
     this.registerConversation(conversationId)
@@ -583,14 +684,12 @@ export class SessionManager {
    * update (messages since they last responded), and fan out.
    */
   async groupSend(groupId: string, text: string): Promise<void> {
-    this.checkBudget()
     const group = getConversation(groupId)
     if (!group || group.kind !== 'group') throw new Error(`Not a group conversation: ${groupId}`)
     const members = listGroupMembers(groupId)
     if (members.length === 0) throw new Error('This group has no members')
 
-    const lower = text.toLowerCase()
-    const mentioned = members.filter((m) => lower.includes(`@${m.title.toLowerCase()}`))
+    const mentioned = members.filter((member) => groupMessageMentions(text, member.title))
     const targets = mentioned.length > 0 ? mentioned : members
 
     // Snapshot each target's room context BEFORE recording the new message.
@@ -630,9 +729,11 @@ export class SessionManager {
         `${contexts.get(member.id) ?? ''}` +
         `New group message from the user: ${text}\n\n` +
         `${addressed} Respond as ${member.title}.`
-      setMemberLastSeq(member.id, cursor)
       const live = this.sessions.get(member.id)
-      if (live) void live.session.send({ text: prompt })
+      if (live) {
+        await this.dispatchProviderTurn(live, { text: prompt })
+        setMemberLastSeq(member.id, cursor)
+      }
     }
   }
 
@@ -669,13 +770,69 @@ export class SessionManager {
     return live
   }
 
-  /** Throws when the configured daily budget has been reached. */
-  private checkBudget(): void {
+  private acquireBudgetTurn(live: LiveSession): string | null {
     const budget = getSetting<number | null>('dailyBudgetUsd', null)
-    if (budget !== null && todaySpend() >= budget) {
+    if (budget === null) return null
+    const reserved = [...this.budgetReservations.values()].reduce(
+      (total, reservation) => total + reservation.estimatedUsd,
+      0
+    )
+    const estimate = Math.min(BUDGET_TURN_RESERVATION_USD, budget)
+    const projected = todaySpend() + reserved + estimate
+    if (projected > budget) {
       throw new Error(
-        `Daily budget reached ($${todaySpend().toFixed(2)} of $${budget.toFixed(2)}). Raise it in Settings → Usage.`
+        `Daily budget reserved or reached ($${(todaySpend() + reserved).toFixed(2)} of $${budget.toFixed(2)}). Wait for active turns or raise it in Settings → Usage.`
       )
+    }
+    const token = randomUUID()
+    this.budgetReservations.set(token, {
+      conversationId: live.conversationId,
+      generation: live.generation,
+      estimatedUsd: estimate
+    })
+    return token
+  }
+
+  private releaseBudgetTurn(
+    conversationId: string,
+    generation: string,
+    token?: string
+  ): number {
+    const reservation = token ? this.budgetReservations.get(token) : undefined
+    if (
+      !token ||
+      !reservation ||
+      reservation.conversationId !== conversationId ||
+      reservation.generation !== generation
+    ) {
+      return 0
+    }
+    this.budgetReservations.delete(token)
+    return reservation.estimatedUsd
+  }
+
+  /** The only path that starts a billable provider turn. */
+  private async dispatchProviderTurn(live: LiveSession, input: UserInput): Promise<void> {
+    const permitToken = this.acquireBudgetTurn(live)
+    if (this.sessions.get(live.conversationId) !== live) {
+      if (permitToken) {
+        this.releaseBudgetTurn(live.conversationId, live.generation, permitToken)
+      }
+      throw new Error('Session changed before its queued turn could start')
+    }
+    if (permitToken) live.pendingBudgetPermitTokens.push(permitToken)
+    try {
+      await live.session.send(input)
+    } catch (err) {
+      if (permitToken) {
+        live.pendingBudgetPermitTokens = live.pendingBudgetPermitTokens.filter(
+          (token) => token !== permitToken
+        )
+      }
+      if (permitToken) {
+        this.releaseBudgetTurn(live.conversationId, live.generation, permitToken)
+      }
+      throw err
     }
   }
 
@@ -688,7 +845,6 @@ export class SessionManager {
   }
 
   async send(localId: string, text: string, attachments?: UserInput['attachments']): Promise<void> {
-    this.checkBudget()
     const live = await this.ensureLive(localId)
     touchConversation(live.conversationId)
     // First message in an untitled chat: generate a proper title in the background.
@@ -711,7 +867,7 @@ export class SessionManager {
       turnId: 'live',
       text: label
     })
-    await live.session.send({ text, attachments })
+    await this.dispatchProviderTurn(live, { text, attachments })
   }
 
   async interrupt(localId: string): Promise<void> {
@@ -763,7 +919,7 @@ export class SessionManager {
     if (!pending) return
     this.pendingPermissions.delete(requestId)
     if (behavior === 'allow' && always) {
-      addAlwaysAllowRule(pending.toolName, pending.conversationId)
+      addAlwaysAllowRule(pending.toolName, pending.conversationId, pending.input)
     }
     pending.resolve(behavior === 'allow' ? { behavior: 'allow' } : { behavior: 'deny' })
   }
@@ -774,6 +930,21 @@ export class SessionManager {
     if (!live) return
     this.sessions.delete(localId)
     this.busHttp.revoke(localId)
+    live.pendingBudgetPermitTokens = []
+    live.budgetPermitByTurnId.clear()
+    for (const [token, reservation] of this.budgetReservations) {
+      if (
+        reservation.conversationId === live.conversationId &&
+        reservation.generation === live.generation
+      ) {
+        this.budgetReservations.delete(token)
+      }
+    }
+    for (const [requestId, pending] of this.pendingPermissions) {
+      if (pending.conversationId !== live.conversationId) continue
+      this.pendingPermissions.delete(requestId)
+      pending.resolve({ behavior: 'deny', message: 'Session closed before permission was granted' })
+    }
     live.sender.flush()
     await live.session.dispose()
   }

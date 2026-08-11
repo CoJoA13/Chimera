@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -33,7 +33,11 @@ export function listPlugins(): PluginRecord[] {
 }
 
 /** Validate a Claude Code plugin folder and register it. */
-export function addPlugin(path: string, gitUrl: string | null = null): PluginRecord {
+export function addPlugin(
+  path: string,
+  gitUrl: string | null = null,
+  enabled = true
+): PluginRecord {
   const manifestPath = join(path, '.claude-plugin', 'plugin.json')
   if (!existsSync(manifestPath)) {
     throw new Error(`Not a Claude Code plugin: missing ${manifestPath}`)
@@ -47,10 +51,10 @@ export function addPlugin(path: string, gitUrl: string | null = null): PluginRec
   }
   const existing = listPlugins().find((p) => p.path === path)
   if (existing) return existing
-  const record: PluginRecord = { id: randomUUID(), name, path, enabled: true, gitUrl }
+  const record: PluginRecord = { id: randomUUID(), name, path, enabled, gitUrl }
   getDb()
-    .prepare('INSERT INTO plugins (id, name, path, enabled, git_url) VALUES (?, ?, ?, 1, ?)')
-    .run(record.id, record.name, record.path, gitUrl)
+    .prepare('INSERT INTO plugins (id, name, path, enabled, git_url) VALUES (?, ?, ?, ?, ?)')
+    .run(record.id, record.name, record.path, enabled ? 1 : 0, gitUrl)
   return record
 }
 
@@ -102,13 +106,20 @@ export function normalizeGitUrl(input: string): { url: string; dirName: string }
   const trimmed = input.trim().replace(/\/+$/, '').replace(/\.git$/, '')
   const short = /^([\w.-]+)\/([\w.-]+)$/.exec(trimmed)
   if (short) {
-    return { url: `https://github.com/${short[1]}/${short[2]}.git`, dirName: `${short[1]}-${short[2]}` }
+    const url = `https://github.com/${short[1]}/${short[2]}.git`
+    return { url, dirName: repoDirectoryName(short[1], short[2], url) }
   }
   const full = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)$/.exec(trimmed)
   if (full) {
-    return { url: `${trimmed}.git`, dirName: `${full[1]}-${full[2]}` }
+    const url = `${trimmed}.git`
+    return { url, dirName: repoDirectoryName(full[1], full[2], url) }
   }
   throw new Error('Use a github.com repo URL or owner/repo shorthand')
+}
+
+function repoDirectoryName(owner: string, repo: string, url: string): string {
+  const suffix = createHash('sha256').update(url).digest('hex').slice(0, 8)
+  return `${owner}-${repo}-${suffix}`
 }
 
 /** Find plugin manifests at the repo root or one/two levels deep (marketplace repos). */
@@ -149,7 +160,9 @@ export async function installPluginsFromGit(input: string): Promise<PluginRecord
     rmSync(target, { recursive: true, force: true })
     throw new Error('No Claude Code plugin found in that repo (missing .claude-plugin/plugin.json)')
   }
-  return dirs.map((dir) => addPlugin(dir, url))
+  // Plugins may contain executable hooks. Installation only stages the code;
+  // the user must inspect and explicitly enable each discovered plugin.
+  return dirs.map((dir) => addPlugin(dir, url, false))
 }
 
 function repoRootFor(pluginPath: string): string | null {

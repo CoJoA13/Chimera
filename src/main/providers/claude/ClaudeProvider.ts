@@ -28,6 +28,7 @@ class PushStream implements AsyncIterable<SDKUserMessage> {
   private ended = false
 
   push(msg: SDKUserMessage): void {
+    if (this.ended) throw new Error('Cannot send to a disposed session')
     const waiter = this.waiters.shift()
     if (waiter) waiter({ value: msg, done: false })
     else this.queue.push(msg)
@@ -35,6 +36,7 @@ class PushStream implements AsyncIterable<SDKUserMessage> {
 
   end(): void {
     this.ended = true
+    this.queue = []
     for (const waiter of this.waiters.splice(0)) {
       waiter({ value: undefined, done: true })
     }
@@ -80,6 +82,7 @@ class ClaudeSession implements ProviderSession {
   private readonly opts: CreateSessionOptions
   private currentTurnId = ''
   private disposed = false
+  private sendQueue: UserInput[] = []
 
   constructor(localId: string, opts: CreateSessionOptions, resumeSessionId?: string) {
     this.localId = localId
@@ -143,6 +146,7 @@ class ClaudeSession implements ProviderSession {
         for (const ev of normalizer.feed(msg)) {
           if (ev.type === 'turn.completed') this.status = 'idle'
           this.opts.onEvent(ev)
+          if (ev.type === 'turn.completed') this.processQueue()
         }
       }
     } catch (err) {
@@ -159,6 +163,15 @@ class ClaudeSession implements ProviderSession {
   }
 
   async send(input: UserInput): Promise<void> {
+    if (this.disposed) throw new Error('Session is disposed')
+    this.sendQueue.push(input)
+    this.processQueue()
+  }
+
+  private processQueue(): void {
+    if (this.disposed || this.status === 'busy') return
+    const input = this.sendQueue.shift()
+    if (!input) return
     this.currentTurnId = randomUUID()
     this.status = 'busy'
     this.opts.onEvent({ type: 'turn.started', localId: this.localId, turnId: this.currentTurnId })
@@ -216,6 +229,7 @@ class ClaudeSession implements ProviderSession {
 
   async dispose(): Promise<void> {
     this.disposed = true
+    this.sendQueue = []
     this.input.end()
     try {
       await this.q.interrupt()

@@ -1,6 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
+import { z } from 'zod'
 import { getDb } from './store/db'
 import { getSetting, setSetting } from './store/settings'
 import { logActivity } from './store/activity'
@@ -25,6 +26,37 @@ interface WireMessage {
 }
 
 const FED_PREFIX = 'fed:'
+const FED_MESSAGE_PREFIX = 'fedmsg:'
+const MAX_DELIVERY_BYTES = 256 * 1024
+
+const wireMessageSchema = z.object({
+  messageId: z.string().min(1).max(256),
+  targetId: z.string().min(1).max(256),
+  fromId: z.string().min(1).max(256),
+  fromTitle: z.string().min(1).max(200),
+  fromPersona: z.string().max(2000).optional(),
+  text: z.string().max(MAX_DELIVERY_BYTES),
+  inReplyTo: z.string().min(1).max(512).optional(),
+  expectsReply: z.boolean()
+})
+
+export function validateWireMessage(payload: unknown): WireMessage {
+  return wireMessageSchema.parse(payload) as WireMessage
+}
+
+export function decodeWireBody(chunks: Buffer[], totalBytes: number): string {
+  return Buffer.concat(chunks, totalBytes).toString('utf8')
+}
+
+function federatedMessageId(peerId: string, remoteId: string): string {
+  return `${FED_MESSAGE_PREFIX}${peerId}:${remoteId}`
+}
+
+function remoteReplyId(peerId: string, localId: string | undefined): string | undefined {
+  if (!localId) return undefined
+  const prefix = `${FED_MESSAGE_PREFIX}${peerId}:`
+  return localId.startsWith(prefix) ? localId.slice(prefix.length) : localId
+}
 
 /**
  * LAN bus federation: expose local sessions to trusted peer Chimera instances
@@ -169,16 +201,17 @@ export class FederationManager {
       fromTitle: from ? `${from.title} @ ${this.displayName()}` : this.displayName(),
       fromPersona: from?.persona,
       text: msg.text,
-      inReplyTo: msg.inReplyTo,
+      inReplyTo: remoteReplyId(peer.id, msg.inReplyTo),
       expectsReply: msg.expectsReply
     }
     try {
-      await fetch(`${peer.url}/deliver`, {
+      const response = await fetch(`${peer.url}/deliver`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(wire),
         signal: AbortSignal.timeout(10_000)
       })
+      if (!response.ok) throw new Error(`Peer returned HTTP ${response.status}`)
     } catch {
       logActivity('federation', `Delivery to peer "${peer.name}" failed`)
     }
@@ -209,14 +242,45 @@ export class FederationManager {
       return
     }
     if (match[2] === 'deliver' && req.method === 'POST') {
-      let body = ''
-      req.on('data', (chunk) => (body += chunk))
+      if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? '')) {
+        res.writeHead(415).end()
+        return
+      }
+      const contentLength = Number(req.headers['content-length'] ?? 0)
+      if (Number.isFinite(contentLength) && contentLength > MAX_DELIVERY_BYTES) {
+        res.writeHead(413).end()
+        req.destroy()
+        return
+      }
+      const chunks: Buffer[] = []
+      let bodyBytes = 0
+      let rejected = false
+      req.setTimeout(10_000, () => {
+        if (rejected) return
+        rejected = true
+        res.writeHead(408).end()
+        req.destroy()
+      })
+      req.on('data', (chunk: Buffer) => {
+        if (rejected) return
+        bodyBytes += chunk.length
+        if (bodyBytes > MAX_DELIVERY_BYTES) {
+          rejected = true
+          res.writeHead(413).end()
+          req.destroy()
+          return
+        }
+        chunks.push(chunk)
+      })
       req.on('end', () => {
+        if (rejected) return
         try {
-          const wire = JSON.parse(body) as WireMessage
+          const body = decodeWireBody(chunks, bodyBytes)
+          const wire = validateWireMessage(JSON.parse(body))
           // Represent the remote sender as a proxy the local bus can reply to.
           const peer = this.peerForRequest(req)
-          const senderProxy = `${FED_PREFIX}${peer?.id ?? 'unknown'}:${wire.fromId}`
+          const peerId = peer?.id ?? 'loopback'
+          const senderProxy = `${FED_PREFIX}${peerId}:${wire.fromId}`
           if (peer) {
             this.bus.register(
               senderProxy,
@@ -232,7 +296,7 @@ export class FederationManager {
             )
           }
           this.bus.injectExternal({
-            messageId: wire.messageId,
+            messageId: federatedMessageId(peerId, wire.messageId),
             from: senderProxy,
             to: wire.targetId,
             text: wire.text,
