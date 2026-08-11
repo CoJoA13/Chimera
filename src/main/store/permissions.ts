@@ -57,18 +57,23 @@ export function listRules(): {
   id: string
   toolName: string
   behavior: string
+  conversationId: string | null
   inputPattern: string | null
 }[] {
-  const rows = getDb().prepare('SELECT * FROM permission_rules').all() as unknown as {
+  const rows = getDb()
+    .prepare('SELECT * FROM permission_rules ORDER BY tool_name, id')
+    .all() as unknown as {
     id: string
     tool_name: string
     behavior: string
+    conversation_id: string | null
     input_pattern: string | null
   }[]
   return rows.map((r) => ({
     id: r.id,
     toolName: r.tool_name,
     behavior: r.behavior,
+    conversationId: r.conversation_id,
     inputPattern: r.input_pattern
   }))
 }

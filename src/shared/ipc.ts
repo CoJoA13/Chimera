@@ -36,6 +36,14 @@ export interface PermissionResponse {
   always?: boolean
 }
 
+export interface PermissionRuleSummary {
+  id: string
+  toolName: string
+  conversationId: string | null
+  conversationTitle: string
+  inputPattern: string | null
+}
+
 /** Typed API exposed on window.chimera by the preload script. */
 export interface ChimeraApi {
   // conversations
@@ -233,6 +241,8 @@ export interface ChimeraApi {
   authStatus(provider: ProviderId): Promise<AuthStatus>
   launchLogin(provider: ProviderId): Promise<void>
   respondPermission(resp: PermissionResponse): Promise<void>
+  listPermissionRules(): Promise<PermissionRuleSummary[]>
+  removePermissionRule(id: string): Promise<void>
   onSessionEvent(cb: (ev: SessionEvent) => void): () => void
 }
 
@@ -300,6 +310,8 @@ export const IPC = {
   sessionDispose: 'session:dispose',
   sessionEvent: 'session:event',
   permissionRespond: 'permission:respond',
+  permissionRulesList: 'permission:rules:list',
+  permissionRulesRemove: 'permission:rules:remove',
   mcpList: 'mcp:list',
   mcpAdd: 'mcp:add',
   mcpRemove: 'mcp:remove',

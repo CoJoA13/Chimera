@@ -60,6 +60,7 @@ import { summarizeBrief } from '../titles'
 import type { FederationManager } from '../federation'
 import { exportBackup } from '../store/maintenance'
 import { isAutostartEnabled, setAutostart, autostartNote } from '../autostart'
+import { listRules, removeRule } from '../store/permissions'
 import {
   listMcpServers,
   addMcpServer,
@@ -360,6 +361,21 @@ export function registerIpc(
       .parse(payload)
     manager.respondPermission(resp.requestId, resp.behavior, resp.always)
   })
+  ipcMain.handle(IPC.permissionRulesList, () =>
+    listRules().map((rule) => ({
+      id: rule.id,
+      toolName: rule.toolName,
+      conversationId: rule.conversationId,
+      conversationTitle: rule.conversationId
+        ? (getConversation(rule.conversationId)?.title ?? 'deleted conversation')
+        : 'All conversations',
+      inputPattern: rule.inputPattern
+    }))
+  )
+  ipcMain.handle(IPC.permissionRulesRemove, (_e, payload: unknown) => {
+    removeRule(z.object({ id: idSchema }).parse(payload).id)
+  })
+
   // mcp
   ipcMain.handle(IPC.mcpList, () => listMcpServers())
   ipcMain.handle(IPC.mcpAdd, (_e, payload: unknown) => {

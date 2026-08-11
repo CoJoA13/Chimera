@@ -152,6 +152,9 @@ const api: ChimeraApi = {
   authStatus: (provider: ProviderId) => ipcRenderer.invoke(IPC.authStatus, { provider }),
   launchLogin: (provider: ProviderId) => ipcRenderer.invoke(IPC.authLaunchLogin, { provider }),
   respondPermission: (resp: PermissionResponse) => ipcRenderer.invoke(IPC.permissionRespond, resp),
+  listPermissionRules: () => ipcRenderer.invoke(IPC.permissionRulesList),
+  removePermissionRule: (id: string) =>
+    ipcRenderer.invoke(IPC.permissionRulesRemove, { id }),
   onSessionEvent: (cb: (ev: SessionEvent) => void) => {
     const listener = (_e: Electron.IpcRendererEvent, ev: SessionEvent): void => cb(ev)
     ipcRenderer.on(IPC.sessionEvent, listener)
