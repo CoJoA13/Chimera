@@ -29,7 +29,20 @@ export function loadTranscript(conversationId: string): SessionEvent[] {
   const rows = getDb()
     .prepare('SELECT event_json FROM transcript_cache WHERE conversation_id = ? ORDER BY seq')
     .all(conversationId) as unknown as { event_json: string }[]
-  return rows.map((r) => JSON.parse(r.event_json) as SessionEvent)
+  let malformed = 0
+  const events = rows.flatMap((row) => {
+    try {
+      return [JSON.parse(row.event_json) as SessionEvent]
+    } catch {
+      // One damaged cache row should not make the entire conversation unreadable.
+      malformed++
+      return []
+    }
+  })
+  if (malformed > 0) {
+    console.warn(`[transcript] skipped ${malformed} malformed row(s) for ${conversationId}`)
+  }
+  return events
 }
 
 /**
@@ -93,7 +106,19 @@ export function loadTranscriptSince(
       'SELECT seq, event_json FROM transcript_cache WHERE conversation_id = ? AND seq > ? ORDER BY seq'
     )
     .all(conversationId, afterSeq) as unknown as { seq: number; event_json: string }[]
-  return rows.map((r) => ({ seq: r.seq, event: JSON.parse(r.event_json) as SessionEvent }))
+  let malformed = 0
+  const events = rows.flatMap((row) => {
+    try {
+      return [{ seq: row.seq, event: JSON.parse(row.event_json) as SessionEvent }]
+    } catch {
+      malformed++
+      return []
+    }
+  })
+  if (malformed > 0) {
+    console.warn(`[transcript] skipped ${malformed} malformed row(s) for ${conversationId}`)
+  }
+  return events
 }
 
 /** Duplicate a transcript (fork history) preserving order. */
@@ -115,7 +140,10 @@ export function searchTranscripts(
   const rows = getDb()
     .prepare(
       `SELECT conversation_id, event_json FROM transcript_cache
-       WHERE event_json LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT 500`
+       WHERE json_valid(event_json)
+         AND json_extract(event_json, '$.type') IN ('user.message', 'text.done')
+         AND json_extract(event_json, '$.text') LIKE ? ESCAPE '\\'
+       ORDER BY seq DESC LIMIT 5000`
     )
     .all(`%${needle.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`) as unknown as {
     conversation_id: string
