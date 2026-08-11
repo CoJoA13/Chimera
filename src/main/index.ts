@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell, Tray } from 'electron'
+import { app, BrowserWindow, Menu, Notification, shell, Tray } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpc } from './ipc/register'
@@ -27,6 +27,7 @@ app.on('second-instance', () => {
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
+let backgroundNoticeShown = false
 const sessionManager = new SessionManager(() => mainWindow?.webContents ?? null)
 
 function showMainWindow(): void {
@@ -39,25 +40,30 @@ function showMainWindow(): void {
 
 function createTray(): void {
   if (tray) return
-  const iconPath = app.isPackaged
-    ? join(process.resourcesPath, 'icon.png')
-    : join(__dirname, '../../build/icon.png')
-  tray = new Tray(iconPath)
-  tray.setToolTip('Chimera')
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Open Chimera', click: showMainWindow },
-      { type: 'separator' },
-      {
-        label: 'Quit',
-        click: () => {
-          isQuitting = true
-          app.quit()
+  try {
+    const iconPath = app.isPackaged
+      ? join(process.resourcesPath, 'icon.png')
+      : join(__dirname, '../../build/icon.png')
+    tray = new Tray(iconPath)
+    tray.setToolTip('Chimera')
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Open Chimera', click: showMainWindow },
+        { type: 'separator' },
+        {
+          label: 'Quit',
+          click: () => {
+            isQuitting = true
+            app.quit()
+          }
         }
-      }
-    ])
-  )
-  tray.on('click', showMainWindow)
+      ])
+    )
+    tray.on('click', showMainWindow)
+  } catch (err) {
+    tray = null
+    console.error('[tray] failed to create:', err)
+  }
 }
 
 function createWindow(): void {
@@ -115,6 +121,13 @@ function createWindow(): void {
     if (isQuitting) return
     event.preventDefault()
     mainWindow?.hide()
+    if (!backgroundNoticeShown && Notification.isSupported()) {
+      backgroundNoticeShown = true
+      new Notification({
+        title: 'Chimera is still running',
+        body: 'Background agents remain active. Reopen Chimera or use Settings to quit completely.'
+      }).show()
+    }
   })
 }
 
@@ -128,8 +141,8 @@ app.whenReady().then(() => {
   void federationManager.start()
   pruneOldData()
   setInterval(pruneOldData, 24 * 60 * 60 * 1000)
-  createTray()
   createWindow()
+  createTray()
 
   app.on('activate', () => {
     showMainWindow()
