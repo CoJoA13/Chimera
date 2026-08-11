@@ -365,6 +365,7 @@ export function registerIpc(
     listRules().map((rule) => ({
       id: rule.id,
       toolName: rule.toolName,
+      behavior: rule.behavior,
       conversationId: rule.conversationId,
       conversationTitle: rule.conversationId
         ? (getConversation(rule.conversationId)?.title ?? 'deleted conversation')

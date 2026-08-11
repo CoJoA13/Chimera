@@ -5,10 +5,7 @@ import type { PermissionRuleSummary } from '../../../../shared/ipc'
 function describeInput(pattern: string | null): string {
   if (!pattern) return 'Any input (legacy rule)'
   try {
-    const value = JSON.parse(pattern) as Record<string, unknown>
-    const primary = value.command ?? value.path ?? value.file_path ?? value.url
-    if (typeof primary === 'string') return primary
-    return JSON.stringify(value, null, 2)
+    return JSON.stringify(JSON.parse(pattern), null, 2)
   } catch {
     return pattern
   }
@@ -29,6 +26,9 @@ export function PermissionsPane() {
 
   useEffect(() => {
     void refresh()
+    return window.chimera.onSessionEvent((event) => {
+      if (event.type === 'permission.resolved') void refresh()
+    })
   }, [])
 
   const revoke = async (id: string): Promise<void> => {
@@ -60,6 +60,9 @@ export function PermissionsPane() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm text-slate-200">
                 <span className="font-medium">{rule.toolName}</span>
+                <span className="rounded bg-emerald-950/60 px-1.5 py-0.5 text-[10px] uppercase text-emerald-400">
+                  {rule.behavior}
+                </span>
                 <span className="truncate text-xs text-slate-500">{rule.conversationTitle}</span>
               </div>
               <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-slate-500">

@@ -39,6 +39,7 @@ export interface PermissionResponse {
 export interface PermissionRuleSummary {
   id: string
   toolName: string
+  behavior: string
   conversationId: string | null
   conversationTitle: string
   inputPattern: string | null
