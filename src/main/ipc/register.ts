@@ -421,7 +421,8 @@ export function registerIpc(
       properties: ['openDirectory']
     })
     if (result.canceled || result.filePaths.length === 0) return null
-    return addPlugin(result.filePaths[0])
+    // Local plugins can contain executable hooks too; stage for inspection.
+    return addPlugin(result.filePaths[0], null, false)
   })
   ipcMain.handle(IPC.pluginsAddFromGit, (_e, payload: unknown) => {
     const { url } = z.object({ url: z.string().min(3).max(300) }).parse(payload)
