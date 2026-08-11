@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, CircleCheck, CircleAlert, Rocket } from 'lucide-react'
+import { X, CircleCheck, CircleAlert, Power, Rocket } from 'lucide-react'
 
 function AutostartToggle() {
   const [state, setState] = useState<{ enabled: boolean; note: string | null } | null>(null)
@@ -31,6 +31,12 @@ function AutostartToggle() {
         background service at login.
       </p>
       {state.note && <p className="mt-1 text-xs text-amber-400">{state.note}</p>}
+      <button
+        onClick={() => void window.chimera.quitApp()}
+        className="mt-3 flex items-center gap-1.5 rounded-md border border-red-900/70 px-2.5 py-1.5 text-xs text-red-300 hover:bg-red-950/40"
+      >
+        <Power size={13} /> Quit Chimera completely
+      </button>
     </div>
   )
 }

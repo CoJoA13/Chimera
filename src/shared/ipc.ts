@@ -232,6 +232,7 @@ export interface ChimeraApi {
   exportBackup(): Promise<string | null>
   getAutostart(): Promise<{ enabled: boolean; note: string | null }>
   setAutostart(enabled: boolean): Promise<void>
+  quitApp(): Promise<void>
   getSetting(key: string): Promise<unknown>
   setSetting(key: string, value: unknown): Promise<void>
   onConversationsChanged(cb: () => void): () => void
@@ -289,6 +290,7 @@ export const IPC = {
   backupExport: 'backup:export',
   autostartGet: 'autostart:get',
   autostartSet: 'autostart:set',
+  appQuit: 'app:quit',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   uiConversationsChanged: 'ui:conversationsChanged',

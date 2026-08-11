@@ -119,6 +119,7 @@ const api: ChimeraApi = {
   exportBackup: () => ipcRenderer.invoke(IPC.backupExport),
   getAutostart: () => ipcRenderer.invoke(IPC.autostartGet),
   setAutostart: (enabled: boolean) => ipcRenderer.invoke(IPC.autostartSet, { enabled }),
+  quitApp: () => ipcRenderer.invoke(IPC.appQuit),
   getSetting: (key: string) => ipcRenderer.invoke(IPC.settingsGet, { key }),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke(IPC.settingsSet, { key, value }),
   onConversationsChanged: (cb: () => void) => {

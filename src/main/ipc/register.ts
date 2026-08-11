@@ -631,6 +631,9 @@ export function registerIpc(
     const { enabled } = z.object({ enabled: z.boolean() }).parse(payload)
     setAutostart(enabled)
   })
+  ipcMain.handle(IPC.appQuit, () => {
+    app.quit()
+  })
 
   // generic settings
   ipcMain.handle(IPC.settingsGet, (_e, payload: unknown) => {
